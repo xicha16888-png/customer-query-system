@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>客户交叉查询系统</title>
+<style>
+  :root{
+    --primary:#2563eb; --danger:#dc2626; --warn:#f59e0b; --ok:#16a34a;
+    --bg:#f4f6f9; --card:#ffffff; --border:#e2e8f0; --text:#1e293b; --muted:#64748b;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--text);}
+  .wrap{max-width:900px;margin:0 auto;padding:24px 16px 60px;}
+  header{text-align:center;margin-bottom:24px;}
+  header h1{font-size:22px;margin:0 0 4px;}
+  header p{color:var(--muted);font-size:13px;margin:0;}
+  .searchCard{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,.05);}
+  .searchRow{display:flex;gap:10px;flex-wrap:wrap;}
+  .searchRow input{flex:1;min-width:160px;padding:11px 14px;border:1px solid var(--border);border-radius:8px;font-size:15px;}
+  .searchRow button{padding:11px 24px;background:var(--primary);color:#fff;border:none;border-radius:8px;font-size:15px;cursor:pointer;font-weight:600;}
+  .searchRow button:hover{background:#1d4ed8;}
+  .searchRow button:disabled{background:#94a3b8;cursor:not-allowed;}
+  .hint{color:var(--muted);font-size:12px;margin-top:8px;}
+  #result{margin-top:20px;}
+  .banner{border-radius:10px;padding:16px 18px;margin-bottom:16px;font-weight:600;font-size:15px;display:none;}
+  .banner.risk{background:#fef2f2;border:1.5px solid var(--danger);color:var(--danger);display:block;}
+  .banner.safe{background:#f0fdf4;border:1.5px solid var(--ok);color:var(--ok);display:block;}
+  .sysCard{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px 18px;margin-bottom:14px;}
+  .sysCard h3{margin:0 0 10px;font-size:15px;display:flex;align-items:center;gap:8px;}
+  .badge{display:inline-block;font-size:12px;padding:2px 8px;border-radius:999px;font-weight:600;}
+  .badge.active{background:#fee2e2;color:var(--danger);}
+  .badge.clear{background:#f1f5f9;color:var(--muted);}
+  .badge.none{background:#f1f5f9;color:var(--muted);}
+  table{width:100%;border-collapse:collapse;font-size:13px;}
+  th,td{text-align:left;padding:7px 6px;border-bottom:1px solid var(--border);}
+  th{color:var(--muted);font-weight:600;font-size:12px;}
+  .status-pill{padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600;}
+  .status-active{background:#fef3c7;color:#b45309;}
+  .status-clear{background:#dcfce7;color:#15803d;}
+  .matchtype{font-size:11px;color:var(--muted);}
+  .empty{color:var(--muted);font-size:13px;padding:6px 0;}
+  .unavailable{color:var(--warn);font-size:12px;}
+  footer{text-align:center;color:var(--muted);font-size:11px;margin-top:30px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>🔎 客户交叉查询系统</h1>
+    <p>同时查询「手机分期 MORODOK」和「小贷/抵押 PAWN」，避免同一客户重复借款</p>
+  </header>
+
+  <div class="searchCard">
+    <div class="searchRow">
+      <input id="qName" type="text" placeholder="客户姓名（如 SIM NAVY）">
+      <input id="qPhone" type="text" placeholder="电话号码（如 012345678）">
+      <button id="btnSearch" onclick="doSearch()">查询</button>
+    </div>
+    <div class="hint">姓名和电话至少填一个；两者都填时匹配更准确。姓名按精确匹配（忽略大小写和空格），电话按末8位匹配。</div>
+  </div>
+
+  <div id="result"></div>
+
+  <footer>数据实时读取自 morodok-system 与 pawn-system 的公开接口，本系统不存储任何客户数据</footer>
+</div>
+
+<script>
+const API_BASE = ''; // 同源部署，留空即可；如需跨域访问改成完整地址
+
+async function doSearch(){
+  const name = document.getElementById('qName').value.trim();
+  const phone = document.getElementById('qPhone').value.trim();
+  const btn = document.getElementById('btnSearch');
+  const resultEl = document.getElementById('result');
+  if(!name && !phone){
+    resultEl.innerHTML = '<div class="banner risk" style="display:block">请至少输入姓名或电话</div>';
+    return;
+  }
+  btn.disabled = true; btn.textContent = '查询中...';
+  resultEl.innerHTML = '<div class="empty">查询中，请稍候...</div>';
+  try{
+    const params = new URLSearchParams();
+    if(name) params.set('name', name);
+    if(phone) params.set('phone', phone);
+    const res = await fetch(`${API_BASE}/api/check?${params.toString()}`);
+    const data = await res.json();
+    if(!data.ok){ resultEl.innerHTML = `<div class="banner risk" style="display:block">查询失败：${esc(data.error||'未知错误')}</div>`; return; }
+    render(data);
+  }catch(e){
+    resultEl.innerHTML = `<div class="banner risk" style="display:block">查询失败：${esc(e.message)}</div>`;
+  }finally{
+    btn.disabled = false; btn.textContent = '查询';
+  }
+}
+
+function esc(s){
+  return (s===undefined||s===null?'':String(s)).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function render(data){
+  const resultEl = document.getElementById('result');
+  let html = '';
+
+  if(data.crossRisk){
+    html += `<div class="banner risk">⚠️ 风险提示：该客户在「手机分期」和「小贷/抵押」两个系统均有未结清贷款，请谨慎审批！</div>`;
+  } else if(data.morodok.hasActive || data.pawn.hasActive){
+    html += `<div class="banner safe" style="background:#fffbeb;border-color:var(--warn);color:#b45309;">该客户仅在一个系统有未结清贷款，暂无交叉风险，请正常核实其还款能力。</div>`;
+  } else if(data.morodok.matches.length===0 && data.pawn.matches.length===0){
+    html += `<div class="banner safe">未在任一系统查到该客户的记录。</div>`;
+  } else {
+    html += `<div class="banner safe">未发现未结清的交叉贷款记录。</div>`;
+  }
+
+  html += renderSysCard('手机分期 MORODOK', data.morodok);
+  html += renderSysCard('小贷/抵押 PAWN', data.pawn);
+
+  resultEl.innerHTML = html;
+}
+
+function renderSysCard(title, sys){
+  let inner = '';
+  if(!sys.available){
+    inner = `<div class="unavailable">⚠️ 无法连接该系统，暂时无法核实（可能是系统休眠中，请稍后重试）</div>`;
+  } else if(sys.matches.length===0){
+    inner = `<div class="empty">未查到相关记录</div>`;
+  } else {
+    inner = `<table><thead><tr>
+      <th>客户</th><th>电话</th><th>状态</th><th>金额</th><th>日期</th><th>机型/店铺</th><th>匹配方式</th>
+    </tr></thead><tbody>`;
+    sys.matches.forEach(m => {
+      const pill = m.active ? `<span class="status-pill status-active">${esc(m.status||'进行中')}</span>` : `<span class="status-pill status-clear">${esc(m.status||'已结清')}</span>`;
+      inner += `<tr>
+        <td>${esc(m.customer)}</td>
+        <td>${esc(m.phone)}${m.idNumber?`<br><span class="matchtype">身份证:${esc(m.idNumber)}</span>`:''}</td>
+        <td>${pill}</td>
+        <td>$${esc(m.amount)}</td>
+        <td>${esc(m.date)}</td>
+        <td>${esc(m.model)} ${esc(m.shop)}</td>
+        <td class="matchtype">${m.matchType==='phone'?'电话匹配':'姓名匹配'}</td>
+      </tr>`;
+    });
+    inner += '</tbody></table>';
+  }
+  const badge = !sys.available ? '' : (sys.hasActive ? '<span class="badge active">有未结清</span>' : '<span class="badge clear">无未结清</span>');
+  return `<div class="sysCard"><h3>${esc(title)} ${badge}</h3>${inner}</div>`;
+}
+
+// 支持回车键搜索
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('qName').addEventListener('keydown', e => { if(e.key==='Enter') doSearch(); });
+  document.getElementById('qPhone').addEventListener('keydown', e => { if(e.key==='Enter') doSearch(); });
+});
+</script>
+</body>
+</html>

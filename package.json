@@ -1,0 +1,15 @@
+{
+  "name": "customer-query-system",
+  "version": "1.0.0",
+  "description": "客户交叉查询系统 - 同时查询 MORODOK(手机分期) 和 PAWN(小贷/抵押) 两个系统，防止同一客户重复借款",
+  "main": "server.js",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}
