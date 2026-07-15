@@ -17,7 +17,7 @@
   header p{color:var(--muted);font-size:13px;margin:0;}
   .searchCard{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,.05);}
   .searchRow{display:flex;gap:10px;flex-wrap:wrap;}
-  .searchRow input{flex:1;min-width:160px;padding:11px 14px;border:1px solid var(--border);border-radius:8px;font-size:15px;}
+  .searchRow input{flex:1;min-width:140px;padding:11px 14px;border:1px solid var(--border);border-radius:8px;font-size:15px;}
   .searchRow button{padding:11px 24px;background:var(--primary);color:#fff;border:none;border-radius:8px;font-size:15px;cursor:pointer;font-weight:600;}
   .searchRow button:hover{background:#1d4ed8;}
   .searchRow button:disabled{background:#94a3b8;cursor:not-allowed;}
@@ -26,18 +26,20 @@
   .banner{border-radius:10px;padding:16px 18px;margin-bottom:16px;font-weight:600;font-size:15px;display:none;}
   .banner.risk{background:#fef2f2;border:1.5px solid var(--danger);color:var(--danger);display:block;}
   .banner.safe{background:#f0fdf4;border:1.5px solid var(--ok);color:var(--ok);display:block;}
+  .banner.caution{background:#fffbeb;border:1.5px solid var(--warn);color:#b45309;display:block;}
   .sysCard{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px 18px;margin-bottom:14px;}
   .sysCard h3{margin:0 0 10px;font-size:15px;display:flex;align-items:center;gap:8px;}
   .badge{display:inline-block;font-size:12px;padding:2px 8px;border-radius:999px;font-weight:600;}
   .badge.active{background:#fee2e2;color:var(--danger);}
   .badge.clear{background:#f1f5f9;color:var(--muted);}
-  .badge.none{background:#f1f5f9;color:var(--muted);}
   table{width:100%;border-collapse:collapse;font-size:13px;}
   th,td{text-align:left;padding:7px 6px;border-bottom:1px solid var(--border);}
   th{color:var(--muted);font-weight:600;font-size:12px;}
-  .status-pill{padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600;}
+  .status-pill{padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600;white-space:nowrap;}
   .status-active{background:#fef3c7;color:#b45309;}
   .status-clear{background:#dcfce7;color:#15803d;}
+  .status-locked{background:#fee2e2;color:#b91c1c;}
+  .status-other{background:#e0e7ff;color:#4338ca;}
   .matchtype{font-size:11px;color:var(--muted);}
   .empty{color:var(--muted);font-size:13px;padding:6px 0;}
   .unavailable{color:var(--warn);font-size:12px;}
@@ -47,34 +49,36 @@
 <body>
 <div class="wrap">
   <header>
-    <h1>🔎 客户交叉查询系统</h1>
-    <p>同时查询「手机分期 MORODOK」和「小贷/抵押 PAWN」，避免同一客户重复借款</p>
+    <h1>客户交叉查询系统</h1>
+    <p>同时查询「手机分期 MORODOK」「小贷/抵押 PAWN」，并参考历史客户名单，避免同一客户重复借款</p>
   </header>
 
   <div class="searchCard">
     <div class="searchRow">
       <input id="qName" type="text" placeholder="客户姓名（如 SIM NAVY）">
-      <input id="qPhone" type="text" placeholder="电话号码（如 012345678）">
+      <input id="qPhone" type="text" placeholder="电话号码">
+      <input id="qId" type="text" placeholder="身份证号">
       <button id="btnSearch" onclick="doSearch()">查询</button>
     </div>
-    <div class="hint">姓名和电话至少填一个；两者都填时匹配更准确。姓名按精确匹配（忽略大小写和空格），电话按末8位匹配。</div>
+    <div class="hint">姓名/电话/身份证号至少填一个，填得越多匹配越准确。姓名精确匹配（忽略大小写和空格），电话按末8位匹配，身份证号按数字匹配。</div>
   </div>
 
   <div id="result"></div>
 
-  <footer>数据实时读取自 morodok-system 与 pawn-system 的公开接口，本系统不存储任何客户数据</footer>
+  <footer>数据实时读取自 morodok-system 与 pawn-system 的公开接口，另含静态导入的历史客户名单，本系统不存储任何客户数据</footer>
 </div>
 
 <script>
-const API_BASE = ''; // 同源部署，留空即可；如需跨域访问改成完整地址
+const API_BASE = '';
 
 async function doSearch(){
   const name = document.getElementById('qName').value.trim();
   const phone = document.getElementById('qPhone').value.trim();
+  const idNumber = document.getElementById('qId').value.trim();
   const btn = document.getElementById('btnSearch');
   const resultEl = document.getElementById('result');
-  if(!name && !phone){
-    resultEl.innerHTML = '<div class="banner risk" style="display:block">请至少输入姓名或电话</div>';
+  if(!name && !phone && !idNumber){
+    resultEl.innerHTML = '<div class="banner risk" style="display:block">请至少输入姓名、电话或身份证号</div>';
     return;
   }
   btn.disabled = true; btn.textContent = '查询中...';
@@ -83,6 +87,7 @@ async function doSearch(){
     const params = new URLSearchParams();
     if(name) params.set('name', name);
     if(phone) params.set('phone', phone);
+    if(idNumber) params.set('idNumber', idNumber);
     const res = await fetch(`${API_BASE}/api/check?${params.toString()}`);
     const data = await res.json();
     if(!data.ok){ resultEl.innerHTML = `<div class="banner risk" style="display:block">查询失败：${esc(data.error||'未知错误')}</div>`; return; }
@@ -105,15 +110,20 @@ function render(data){
   if(data.crossRisk){
     html += `<div class="banner risk">⚠️ 风险提示：该客户在「手机分期」和「小贷/抵押」两个系统均有未结清贷款，请谨慎审批！</div>`;
   } else if(data.morodok.hasActive || data.pawn.hasActive){
-    html += `<div class="banner safe" style="background:#fffbeb;border-color:var(--warn);color:#b45309;">该客户仅在一个系统有未结清贷款，暂无交叉风险，请正常核实其还款能力。</div>`;
-  } else if(data.morodok.matches.length===0 && data.pawn.matches.length===0){
-    html += `<div class="banner safe">未在任一系统查到该客户的记录。</div>`;
+    html += `<div class="banner caution">该客户仅在一个系统有未结清贷款，暂无交叉风险，请正常核实其还款能力。</div>`;
+  } else if(data.morodok.matches.length===0 && data.pawn.matches.length===0 && data.legacy.matches.length===0){
+    html += `<div class="banner safe">未在任一系统或历史名单查到该客户的记录。</div>`;
   } else {
     html += `<div class="banner safe">未发现未结清的交叉贷款记录。</div>`;
   }
 
+  if(data.legacyRisk){
+    html += `<div class="banner caution">📋 提示：该客户在历史名单中曾有锁机/逾期记录（无金额明细，仅供参考）。</div>`;
+  }
+
   html += renderSysCard('手机分期 MORODOK', data.morodok);
   html += renderSysCard('小贷/抵押 PAWN', data.pawn);
+  html += renderLegacyCard(data.legacy);
 
   resultEl.innerHTML = html;
 }
@@ -137,7 +147,7 @@ function renderSysCard(title, sys){
         <td>$${esc(m.amount)}</td>
         <td>${esc(m.date)}</td>
         <td>${esc(m.model)} ${esc(m.shop)}</td>
-        <td class="matchtype">${m.matchType==='phone'?'电话匹配':'姓名匹配'}</td>
+        <td class="matchtype">${m.matchType==='phone'?'电话匹配':m.matchType==='id'?'身份证匹配':'姓名匹配'}</td>
       </tr>`;
     });
     inner += '</tbody></table>';
@@ -146,10 +156,33 @@ function renderSysCard(title, sys){
   return `<div class="sysCard"><h3>${esc(title)} ${badge}</h3>${inner}</div>`;
 }
 
-// 支持回车键搜索
+function renderLegacyCard(legacy){
+  let inner = '';
+  if(!legacy.available){
+    inner = `<div class="unavailable">历史名单未加载</div>`;
+  } else if(legacy.matches.length===0){
+    inner = `<div class="empty">未查到相关记录</div>`;
+  } else {
+    inner = `<table><thead><tr><th>姓名</th><th>身份证号</th><th>性别</th><th>历史状态</th><th>匹配方式</th></tr></thead><tbody>`;
+    legacy.matches.forEach(m => {
+      const cls = m.statusCategory==='locked' ? 'status-locked' : m.statusCategory==='settled' ? 'status-clear' : 'status-other';
+      inner += `<tr>
+        <td>${esc(m.customer)}</td>
+        <td>${esc(m.idNumber)}</td>
+        <td>${esc(m.gender)}</td>
+        <td><span class="status-pill ${cls}">${esc(m.status)}</span></td>
+        <td class="matchtype">${m.matchType==='id'?'身份证匹配':'姓名匹配'}</td>
+      </tr>`;
+    });
+    inner += '</tbody></table>';
+  }
+  return `<div class="sysCard"><h3>${esc(legacy.label)}</h3>${inner}</div>`;
+}
+
 document.addEventListener('DOMContentLoaded', () => {
-  document.getElementById('qName').addEventListener('keydown', e => { if(e.key==='Enter') doSearch(); });
-  document.getElementById('qPhone').addEventListener('keydown', e => { if(e.key==='Enter') doSearch(); });
+  ['qName','qPhone','qId'].forEach(id => {
+    document.getElementById(id).addEventListener('keydown', e => { if(e.key==='Enter') doSearch(); });
+  });
 });
 </script>
 </body>

@@ -1,12 +1,10 @@
 const express = require('express');
+const fs = require('fs');
+const path = require('path');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// ══════════════════════════════════════════
-// 数据源：直接读取两个现有系统的公开只读接口
-// 不需要 Supabase 密钥，两个系统的 /api/data 本身就是公开、带 CORS 的接口
-// ══════════════════════════════════════════
 const SOURCES = {
   morodok: {
     name: '手机分期 (MORODOK)',
@@ -20,6 +18,15 @@ const SOURCES = {
   }
 };
 
+let LEGACY = [];
+try {
+  const raw = fs.readFileSync(path.join(__dirname, 'legacy-customers.json'), 'utf-8');
+  LEGACY = JSON.parse(raw);
+  console.log(`已加载历史客户名单 ${LEGACY.length} 条`);
+} catch (e) {
+  console.error('加载历史客户名单失败:', e.message);
+}
+
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -30,8 +37,7 @@ app.use((req, res, next) => {
 app.use(express.json());
 app.use(express.static(__dirname));
 
-// ── 简单内存缓存（30秒），避免每次查询都拉取整份数据 ──
-const cache = {}; // { morodok: { data, time }, pawn: { data, time } }
+const cache = {};
 const CACHE_TTL = 30 * 1000;
 
 async function fetchSource(key) {
@@ -49,21 +55,25 @@ async function fetchSource(key) {
     return { ok: true, records, stale: false };
   } catch (e) {
     console.error(`拉取 ${key} 失败:`, e.message);
-    if (cached) return { ok: true, records: cached.data, stale: true }; // 用旧缓存兜底
+    if (cached) return { ok: true, records: cached.data, stale: true };
     return { ok: false, records: [], error: e.message };
   }
 }
 
-// ── 归一化工具 ──
 function normName(n) {
   return (n || '').toString().toUpperCase().trim().replace(/\s+/g, ' ');
 }
 function phoneKey(p) {
   const digits = (p || '').toString().replace(/\D/g, '');
-  return digits.slice(-8); // 取末8位比较，兼容 855/0 前缀差异
+  return digits.slice(-8);
+}
+function idKeyFull(v) {
+  return (v || '').toString().replace(/\D/g, '');
+}
+function idKeyNoSuffix(v) {
+  return (v || '').toString().replace(/[（(].*?[）)]/g, '').replace(/\D/g, '');
 }
 function isActive(status) {
-  // 已结清 / 提前结清 视为非活跃，其余（进行中/逾期/其它）视为活跃
   return !/结清/.test(status || '');
 }
 
@@ -83,7 +93,6 @@ function summarizeRecord(key, r) {
       shop: r.shopName || r.storeName || ''
     };
   }
-  // pawn
   return {
     system: 'pawn',
     id: r.id,
@@ -100,15 +109,19 @@ function summarizeRecord(key, r) {
   };
 }
 
-function matchRecords(records, key, qNameNorm, qPhoneKey) {
+function matchRecords(records, key, q) {
   const out = [];
   for (const r of records) {
     const recPhoneKey = phoneKey(r.customerPhone);
     const recNameNorm = normName(r.customer);
+    const recIdFull = idKeyFull(r.customerId);
+    const recIdNoSuffix = idKeyNoSuffix(r.customerId);
     let matchType = null;
-    if (qPhoneKey && qPhoneKey.length >= 7 && recPhoneKey === qPhoneKey) {
+    if (q.phoneKey && recPhoneKey && q.phoneKey.length >= 7 && recPhoneKey === q.phoneKey) {
       matchType = 'phone';
-    } else if (qNameNorm && recNameNorm && recNameNorm === qNameNorm) {
+    } else if (q.idFull && recIdFull && q.idFull.length >= 6 && (recIdFull === q.idFull || recIdNoSuffix === q.idNoSuffix)) {
+      matchType = 'id';
+    } else if (q.nameNorm && recNameNorm && recNameNorm === q.nameNorm) {
       matchType = 'name';
     }
     if (matchType) {
@@ -117,31 +130,72 @@ function matchRecords(records, key, qNameNorm, qPhoneKey) {
       out.push(s);
     }
   }
-  // 活跃的排前面
   out.sort((a, b) => (b.active - a.active));
+  return out;
+}
+
+const STATUS_LABEL = {
+  settled: '已结清(历史)',
+  locked: '锁机/逾期(历史)',
+  other: '其他备注(历史)',
+  unmarked: '无标记(历史)'
+};
+
+function matchLegacy(q) {
+  const out = [];
+  for (const r of LEGACY) {
+    const recNameNorm = normName(r.name);
+    const recIdFull = idKeyFull(r.idNumber);
+    const recIdNoSuffix = idKeyNoSuffix(r.idNumber);
+    let matchType = null;
+    if (q.idFull && recIdFull && q.idFull.length >= 6 && (recIdFull === q.idFull || recIdNoSuffix === q.idNoSuffix)) {
+      matchType = 'id';
+    } else if (q.nameNorm && recNameNorm && recNameNorm === q.nameNorm) {
+      matchType = 'name';
+    }
+    if (matchType) {
+      out.push({
+        system: 'legacy',
+        customer: r.name,
+        idNumber: r.idNumber,
+        gender: r.gender,
+        status: STATUS_LABEL[r.statusCategory] || r.statusRaw,
+        statusCategory: r.statusCategory,
+        statusRaw: r.statusRaw,
+        matchType
+      });
+    }
+  }
   return out;
 }
 
 app.get('/api/check', async (req, res) => {
   const name = (req.query.name || '').trim();
   const phone = (req.query.phone || '').trim();
-  if (!name && !phone) {
-    return res.status(400).json({ ok: false, error: '请至少提供姓名或电话' });
+  const idNumber = (req.query.idNumber || '').trim();
+  if (!name && !phone && !idNumber) {
+    return res.status(400).json({ ok: false, error: '请至少提供姓名、电话或身份证号其中一项' });
   }
-  const qNameNorm = normName(name);
-  const qPhoneKey = phoneKey(phone);
+  const q = {
+    nameNorm: normName(name),
+    phoneKey: phoneKey(phone),
+    idFull: idKeyFull(idNumber),
+    idNoSuffix: idKeyNoSuffix(idNumber)
+  };
 
   const [morodokRes, pawnRes] = await Promise.all([fetchSource('morodok'), fetchSource('pawn')]);
 
-  const morodokMatches = matchRecords(morodokRes.records, 'morodok', qNameNorm, qPhoneKey);
-  const pawnMatches = matchRecords(pawnRes.records, 'pawn', qNameNorm, qPhoneKey);
+  const morodokMatches = matchRecords(morodokRes.records, 'morodok', q);
+  const pawnMatches = matchRecords(pawnRes.records, 'pawn', q);
+  const legacyMatches = matchLegacy(q);
 
   const morodokActive = morodokMatches.some(m => m.active);
   const pawnActive = pawnMatches.some(m => m.active);
+  const legacyLocked = legacyMatches.some(m => m.statusCategory === 'locked');
 
   res.json({
     ok: true,
-    query: { name, phone },
+    query: { name, phone, idNumber },
     morodok: {
       label: SOURCES.morodok.name,
       available: morodokRes.ok,
@@ -156,15 +210,23 @@ app.get('/api/check', async (req, res) => {
       matches: pawnMatches,
       hasActive: pawnActive
     },
-    crossRisk: morodokActive && pawnActive
+    legacy: {
+      label: `历史名单参考（共${LEGACY.length}条静态导入，仅姓名/身份证号/状态，无金额）`,
+      available: LEGACY.length > 0,
+      matches: legacyMatches,
+      hasLocked: legacyLocked
+    },
+    crossRisk: morodokActive && pawnActive,
+    legacyRisk: legacyLocked
   });
 });
 
-app.get('/api/health', (req, res) => res.json({ status: 'ok', time: new Date().toISOString() }));
+app.get('/api/health', (req, res) => res.json({ status: 'ok', time: new Date().toISOString(), legacyCount: LEGACY.length }));
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log('\n' + '═'.repeat(50));
-  console.log('  🔎 客户交叉查询系统');
+  console.log('  客户交叉查询系统');
   console.log(`  监听端口: ${PORT}`);
+  console.log(`  历史名单: ${LEGACY.length} 条`);
   console.log('═'.repeat(50) + '\n');
 });
