@@ -212,6 +212,7 @@ app.get('/api/check', async (req, res) => {
     },
     legacy: {
       label: `历史名单参考（共${LEGACY.length}条静态导入，仅姓名/身份证号/状态，无金额）`,
+      count: LEGACY.length,
       available: LEGACY.length > 0,
       matches: legacyMatches,
       hasLocked: legacyLocked
@@ -224,9 +225,7 @@ app.get('/api/check', async (req, res) => {
 app.get('/api/health', (req, res) => res.json({ status: 'ok', time: new Date().toISOString(), legacyCount: LEGACY.length }));
 
 app.listen(PORT, '0.0.0.0', () => {
-  console.log('\n' + '═'.repeat(50));
-  console.log('  客户交叉查询系统');
-  console.log(`  监听端口: ${PORT}`);
-  console.log(`  历史名单: ${LEGACY.length} 条`);
-  console.log('═'.repeat(50) + '\n');
+  console.log('Customer Cross-Check System');
+  console.log('Port: ' + PORT);
+  console.log('Legacy records: ' + LEGACY.length);
 });

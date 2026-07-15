@@ -1,24 +1,29 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="km">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>客户交叉查询系统</title>
+<title>ប្រព័ន្ធត្រួតពិនិត្យអតិថិជនឆ្លងប្រព័ន្ធ</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
 <style>
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+Khmer:wght@400;500;700&family=Noto+Sans+SC:wght@400;500;700&display=swap');
   :root{
     --primary:#2563eb; --danger:#dc2626; --warn:#f59e0b; --ok:#16a34a;
     --bg:#f4f6f9; --card:#ffffff; --border:#e2e8f0; --text:#1e293b; --muted:#64748b;
   }
   *{box-sizing:border-box;}
-  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--text);}
+  body{margin:0;font-family:'Noto Sans Khmer','Noto Sans SC',-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--text);}
   .wrap{max-width:900px;margin:0 auto;padding:24px 16px 60px;}
-  header{text-align:center;margin-bottom:24px;}
+  header{text-align:center;margin-bottom:16px;}
   header h1{font-size:22px;margin:0 0 4px;}
   header p{color:var(--muted);font-size:13px;margin:0;}
+  .langBar{display:flex;justify-content:center;gap:6px;margin-bottom:18px;}
+  .langBtn{padding:5px 14px;border-radius:999px;border:1px solid var(--border);background:#fff;font-size:12px;cursor:pointer;color:var(--muted);}
+  .langBtn.active{background:var(--primary);color:#fff;border-color:var(--primary);font-weight:600;}
   .searchCard{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,.05);}
   .searchRow{display:flex;gap:10px;flex-wrap:wrap;}
-  .searchRow input{flex:1;min-width:140px;padding:11px 14px;border:1px solid var(--border);border-radius:8px;font-size:15px;}
-  .searchRow button{padding:11px 24px;background:var(--primary);color:#fff;border:none;border-radius:8px;font-size:15px;cursor:pointer;font-weight:600;}
+  .searchRow input{flex:1;min-width:140px;padding:11px 14px;border:1px solid var(--border);border-radius:8px;font-size:15px;font-family:inherit;}
+  .searchRow button{padding:11px 24px;background:var(--primary);color:#fff;border:none;border-radius:8px;font-size:15px;cursor:pointer;font-weight:600;font-family:inherit;}
   .searchRow button:hover{background:#1d4ed8;}
   .searchRow button:disabled{background:#94a3b8;cursor:not-allowed;}
   .hint{color:var(--muted);font-size:12px;margin-top:8px;}
@@ -48,28 +53,168 @@
 </head>
 <body>
 <div class="wrap">
+  <div class="langBar" id="langBar"></div>
   <header>
-    <h1>客户交叉查询系统</h1>
-    <p>同时查询「手机分期 MORODOK」「小贷/抵押 PAWN」，并参考历史客户名单，避免同一客户重复借款</p>
+    <h1 id="hTitle"></h1>
+    <p id="hSubtitle"></p>
   </header>
 
   <div class="searchCard">
     <div class="searchRow">
-      <input id="qName" type="text" placeholder="客户姓名（如 SIM NAVY）">
-      <input id="qPhone" type="text" placeholder="电话号码">
-      <input id="qId" type="text" placeholder="身份证号">
-      <button id="btnSearch" onclick="doSearch()">查询</button>
+      <input id="qName" type="text">
+      <input id="qPhone" type="text">
+      <input id="qId" type="text">
+      <button id="btnSearch" onclick="doSearch()"></button>
     </div>
-    <div class="hint">姓名/电话/身份证号至少填一个，填得越多匹配越准确。姓名精确匹配（忽略大小写和空格），电话按末8位匹配，身份证号按数字匹配。</div>
+    <div class="hint" id="hintText"></div>
   </div>
 
   <div id="result"></div>
 
-  <footer>数据实时读取自 morodok-system 与 pawn-system 的公开接口，另含静态导入的历史客户名单，本系统不存储任何客户数据</footer>
+  <footer id="footerText"></footer>
 </div>
 
 <script>
 const API_BASE = '';
+
+// ══════════════════════════════════════════
+// 多语言：高棉语(km)为默认/主要语言，其次英文(en)，最后中文(zh)
+// ══════════════════════════════════════════
+const LANGS = ['km','en','zh'];
+const LANG_NAMES = { km: 'ខ្មែរ', en: 'English', zh: '中文' };
+
+const I18N = {
+  km: {
+    title: 'ប្រព័ន្ធត្រួតពិនិត្យអតិថិជនឆ្លងប្រព័ន្ធ',
+    subtitle: 'ស្វែងរកក្នុងប្រព័ន្ធ MORODOK (ទូរស័ព្ទបង់រំលស់) និង PAWN (កម្ចីតូច/បញ្ចាំ) ព្រមទាំងបញ្ជីអតិថិជនចាស់ ដើម្បីជៀសវាងអតិថិជនតែម្នាក់ខ្ចីលុយច្រើនកន្លែង',
+    phName: 'ឈ្មោះអតិថិជន (ឧ. SIM NAVY)',
+    phPhone: 'លេខទូរស័ព្ទ',
+    phId: 'លេខអត្តសញ្ញាណប័ណ្ណ',
+    btnSearch: 'ស្វែងរក',
+    btnSearching: 'កំពុងស្វែងរក...',
+    hint: 'សូមបំពេញយ៉ាងហោចណាស់មួយ៖ ឈ្មោះ/លេខទូរស័ព្ទ/លេខអត្តសញ្ញាណប័ណ្ណ បំពេញកាន់តែច្រើនលទ្ធផលកាន់តែច្បាស់។ ឈ្មោះផ្គូផ្គងពិតប្រាកដ លេខទូរស័ព្ទផ្គូផ្គង៨ខ្ទង់ចុងក្រោយ លេខអត្តសញ្ញាណប័ណ្ណផ្គូផ្គងតាមលេខ។',
+    footer: 'ទិន្នន័យទាញយកផ្ទាល់ពី morodok-system និង pawn-system ព្រមទាំងបញ្ជីអតិថិជនចាស់ដែលបាននាំចូលឋិតិវន្ត។ ប្រព័ន្ធនេះមិនរក្សាទុកទិន្នន័យអតិថិជនណាមួយឡើយ។',
+    errNoInput: 'សូមបញ្ចូលឈ្មោះ លេខទូរស័ព្ទ ឬលេខអត្តសញ្ញាណប័ណ្ណ យ៉ាងហោចណាស់មួយ',
+    errFail: 'ស្វែងរកបរាជ័យ៖ ',
+    bannerCrossRisk: '⚠️ ប្រយ័ត្ន៖ អតិថិជននេះមានបំណុលមិនទាន់សងទាំងក្នុងប្រព័ន្ធទូរស័ព្ទបង់រំលស់ និងកម្ចីតូច/បញ្ចាំ! សូមពិនិត្យដោយប្រុងប្រយ័ត្ន!',
+    bannerOneActive: 'អតិថិជននេះមានបំណុលមិនទាន់សងតែក្នុងប្រព័ន្ធមួយប៉ុណ្ណោះ គ្មានហានិភ័យឆ្លងប្រព័ន្ធទេ សូមផ្ទៀងផ្ទាត់លទ្ធភាពសងបំណុលដូចធម្មតា។',
+    bannerNone: 'រកមិនឃើញកំណត់ត្រាអតិថិជននេះទាំងក្នុងប្រព័ន្ធណាមួយ ឬបញ្ជីអតិថិជនចាស់ទេ។',
+    bannerClear: 'មិនមានកំណត់ត្រាបំណុលឆ្លងប្រព័ន្ធដែលមិនទាន់សងទេ។',
+    bannerLegacyRisk: '📋 ចំណាំ៖ អតិថិជននេះធ្លាប់មានកំណត់ត្រាចាក់សោទូរស័ព្ទ/ហួសកាលកំណត់ក្នុងបញ្ជីចាស់ (គ្មានលម្អិតចំនួនទឹកប្រាក់ ជាព័ត៌មានយោងតែប៉ុណ្ណោះ)។',
+    sysMorodok: 'ទូរស័ព្ទបង់រំលស់ (MORODOK)',
+    sysPawn: 'កម្ចីតូច/បញ្ចាំ (PAWN)',
+    legacyLabel: 'បញ្ជីយោងអតិថិជនចាស់ ({count} កំណត់ត្រា មានតែឈ្មោះ/លេខអត្តសញ្ញាណប័ណ្ណ/ស្ថានភាព គ្មានចំនួនទឹកប្រាក់)',
+    unavailable: '⚠️ មិនអាចភ្ជាប់ទៅប្រព័ន្ធនេះបានទេ (ប្រហែលកំពុងដេក សូមព្យាយាមម្ដងទៀត)',
+    empty: 'រកមិនឃើញកំណត់ត្រា',
+    legacyUnavailable: 'បញ្ជីអតិថិជនចាស់មិនទាន់ផ្ទុក',
+    badgeActive: 'មានបំណុលមិនទាន់សង',
+    badgeClear: 'គ្មានបំណុលមិនទាន់សង',
+    thCustomer: 'អតិថិជន', thPhone: 'លេខទូរស័ព្ទ', thStatus: 'ស្ថានភាព', thAmount: 'ចំនួនទឹកប្រាក់',
+    thDate: 'កាលបរិច្ឆេទ', thModelShop: 'ម៉ូដែល/ហាង', thMatch: 'របៀបផ្គូផ្គង',
+    thName: 'ឈ្មោះ', thIdNumber: 'អត្តសញ្ញាណប័ណ្ណ', thGender: 'ភេទ', thHistStatus: 'ស្ថានភាពប្រវត្តិ',
+    matchPhone: 'ផ្គូផ្គងទូរស័ព្ទ', matchId: 'ផ្គូផ្គងអត្តសញ្ញាណប័ណ្ណ', matchName: 'ផ្គូផ្គងឈ្មោះ',
+    statusSettled: 'ទូទាត់រួច(ប្រវត្តិ)', statusLocked: 'ចាក់សោ/ហួសកាលកំណត់(ប្រវត្តិ)',
+    statusOther: 'ចំណាំផ្សេង(ប្រវត្តិ)', statusUnmarked: 'គ្មានសម្គាល់(ប្រវត្តិ)',
+    srcActive: 'កំពុងដំណើរការ', srcSettled: 'ទូទាត់រួច', srcEarlySettled: 'ទូទាត់មុនកាលកំណត់', srcOverdue: 'ហួសកាលកំណត់'
+  },
+  en: {
+    title: 'Customer Cross-Check System',
+    subtitle: 'Search both MORODOK (Phone Installment) and PAWN (Micro-loan/Pawn), plus a historical customer list, to prevent duplicate lending.',
+    phName: 'Customer name (e.g. SIM NAVY)',
+    phPhone: 'Phone number',
+    phId: 'ID number',
+    btnSearch: 'Search',
+    btnSearching: 'Searching...',
+    hint: 'Fill in at least one of name / phone / ID number — more fields means a more accurate match. Name matches exactly, phone matches by last 8 digits, ID matches by digits.',
+    footer: 'Data is read live from morodok-system and pawn-system, plus a statically imported historical customer list. No customer data is stored by this system.',
+    errNoInput: 'Please enter at least a name, phone, or ID number',
+    errFail: 'Search failed: ',
+    bannerCrossRisk: '⚠️ Risk alert: this customer has unpaid loans in BOTH the Phone Installment and Micro-loan/Pawn systems. Please review carefully!',
+    bannerOneActive: 'This customer has an unpaid loan in only one system — no cross-risk detected. Please verify repayment ability as usual.',
+    bannerNone: 'No record found for this customer in either system or the historical list.',
+    bannerClear: 'No unpaid cross-system loans found.',
+    bannerLegacyRisk: '📋 Note: this customer has a locked/overdue record in the historical list (no amount details, for reference only).',
+    sysMorodok: 'Phone Installment (MORODOK)',
+    sysPawn: 'Micro-loan / Pawn (PAWN)',
+    legacyLabel: 'Historical reference list ({count} records, name/ID/status only, no amounts)',
+    unavailable: '⚠️ Unable to connect to this system right now (it may be asleep, try again shortly)',
+    empty: 'No matching records found',
+    legacyUnavailable: 'Historical list not loaded',
+    badgeActive: 'Has unpaid loan',
+    badgeClear: 'No unpaid loan',
+    thCustomer: 'Customer', thPhone: 'Phone', thStatus: 'Status', thAmount: 'Amount',
+    thDate: 'Date', thModelShop: 'Model/Shop', thMatch: 'Match type',
+    thName: 'Name', thIdNumber: 'ID Number', thGender: 'Gender', thHistStatus: 'Historical status',
+    matchPhone: 'Phone match', matchId: 'ID match', matchName: 'Name match',
+    statusSettled: 'Settled (historical)', statusLocked: 'Locked/Overdue (historical)',
+    statusOther: 'Other note (historical)', statusUnmarked: 'Unmarked (historical)',
+    srcActive: 'In progress', srcSettled: 'Settled', srcEarlySettled: 'Settled early', srcOverdue: 'Overdue'
+  },
+  zh: {
+    title: '客户交叉查询系统',
+    subtitle: '同时查询「手机分期 MORODOK」「小贷/抵押 PAWN」，并参考历史客户名单，避免同一客户重复借款',
+    phName: '客户姓名（如 SIM NAVY）',
+    phPhone: '电话号码',
+    phId: '身份证号',
+    btnSearch: '查询',
+    btnSearching: '查询中...',
+    hint: '姓名/电话/身份证号至少填一个，填得越多匹配越准确。姓名精确匹配，电话按末8位匹配，身份证号按数字匹配。',
+    footer: '数据实时读取自 morodok-system 与 pawn-system，另含静态导入的历史客户名单，本系统不存储任何客户数据',
+    errNoInput: '请至少输入姓名、电话或身份证号',
+    errFail: '查询失败：',
+    bannerCrossRisk: '⚠️ 风险提示：该客户在「手机分期」和「小贷/抵押」两个系统均有未结清贷款，请谨慎审批！',
+    bannerOneActive: '该客户仅在一个系统有未结清贷款，暂无交叉风险，请正常核实其还款能力。',
+    bannerNone: '未在任一系统或历史名单查到该客户的记录。',
+    bannerClear: '未发现未结清的交叉贷款记录。',
+    bannerLegacyRisk: '📋 提示：该客户在历史名单中曾有锁机/逾期记录（无金额明细，仅供参考）。',
+    sysMorodok: '手机分期 MORODOK',
+    sysPawn: '小贷/抵押 PAWN',
+    legacyLabel: '历史名单参考（共{count}条静态导入，仅姓名/身份证号/状态，无金额）',
+    unavailable: '⚠️ 无法连接该系统，暂时无法核实（可能是系统休眠中，请稍后重试）',
+    empty: '未查到相关记录',
+    legacyUnavailable: '历史名单未加载',
+    badgeActive: '有未结清',
+    badgeClear: '无未结清',
+    thCustomer: '客户', thPhone: '电话', thStatus: '状态', thAmount: '金额',
+    thDate: '日期', thModelShop: '机型/店铺', thMatch: '匹配方式',
+    thName: '姓名', thIdNumber: '身份证号', thGender: '性别', thHistStatus: '历史状态',
+    matchPhone: '电话匹配', matchId: '身份证匹配', matchName: '姓名匹配',
+    statusSettled: '已结清(历史)', statusLocked: '锁机/逾期(历史)',
+    statusOther: '其他备注(历史)', statusUnmarked: '无标记(历史)',
+    srcActive: '进行中', srcSettled: '已结清', srcEarlySettled: '提前结清', srcOverdue: '逾期'
+  }
+};
+
+const SRC_STATUS_KEY = { '进行中':'srcActive', '已结清':'srcSettled', '提前结清':'srcEarlySettled', '逾期':'srcOverdue' };
+
+let curLang = localStorage.getItem('cq_lang') || 'km';
+function t(key){ return (I18N[curLang] && I18N[curLang][key]) || I18N.km[key] || key; }
+function translateSrcStatus(raw){
+  const k = SRC_STATUS_KEY[raw];
+  return k ? t(k) : (raw || '');
+}
+
+function setLang(lang){
+  curLang = lang;
+  localStorage.setItem('cq_lang', lang);
+  document.documentElement.lang = lang;
+  renderChrome();
+  const resultEl = document.getElementById('result');
+  if (resultEl.dataset.hasData === '1' && window._lastData) render(window._lastData);
+}
+
+function renderChrome(){
+  document.getElementById('hTitle').textContent = t('title');
+  document.getElementById('hSubtitle').textContent = t('subtitle');
+  document.getElementById('qName').placeholder = t('phName');
+  document.getElementById('qPhone').placeholder = t('phPhone');
+  document.getElementById('qId').placeholder = t('phId');
+  document.getElementById('btnSearch').textContent = t('btnSearch');
+  document.getElementById('hintText').textContent = t('hint');
+  document.getElementById('footerText').textContent = t('footer');
+  const bar = document.getElementById('langBar');
+  bar.innerHTML = LANGS.map(l => `<button class="langBtn ${l===curLang?'active':''}" onclick="setLang('${l}')">${LANG_NAMES[l]}</button>`).join('');
+}
 
 async function doSearch(){
   const name = document.getElementById('qName').value.trim();
@@ -78,11 +223,11 @@ async function doSearch(){
   const btn = document.getElementById('btnSearch');
   const resultEl = document.getElementById('result');
   if(!name && !phone && !idNumber){
-    resultEl.innerHTML = '<div class="banner risk" style="display:block">请至少输入姓名、电话或身份证号</div>';
+    resultEl.innerHTML = `<div class="banner risk" style="display:block">${esc(t('errNoInput'))}</div>`;
     return;
   }
-  btn.disabled = true; btn.textContent = '查询中...';
-  resultEl.innerHTML = '<div class="empty">查询中，请稍候...</div>';
+  btn.disabled = true; btn.textContent = t('btnSearching');
+  resultEl.innerHTML = `<div class="empty">${esc(t('btnSearching'))}</div>`;
   try{
     const params = new URLSearchParams();
     if(name) params.set('name', name);
@@ -90,12 +235,14 @@ async function doSearch(){
     if(idNumber) params.set('idNumber', idNumber);
     const res = await fetch(`${API_BASE}/api/check?${params.toString()}`);
     const data = await res.json();
-    if(!data.ok){ resultEl.innerHTML = `<div class="banner risk" style="display:block">查询失败：${esc(data.error||'未知错误')}</div>`; return; }
+    if(!data.ok){ resultEl.innerHTML = `<div class="banner risk" style="display:block">${esc(t('errFail'))}${esc(data.error||'')}</div>`; return; }
+    window._lastData = data;
+    resultEl.dataset.hasData = '1';
     render(data);
   }catch(e){
-    resultEl.innerHTML = `<div class="banner risk" style="display:block">查询失败：${esc(e.message)}</div>`;
+    resultEl.innerHTML = `<div class="banner risk" style="display:block">${esc(t('errFail'))}${esc(e.message)}</div>`;
   }finally{
-    btn.disabled = false; btn.textContent = '查询';
+    btn.disabled = false; btn.textContent = t('btnSearch');
   }
 }
 
@@ -108,21 +255,21 @@ function render(data){
   let html = '';
 
   if(data.crossRisk){
-    html += `<div class="banner risk">⚠️ 风险提示：该客户在「手机分期」和「小贷/抵押」两个系统均有未结清贷款，请谨慎审批！</div>`;
+    html += `<div class="banner risk">${esc(t('bannerCrossRisk'))}</div>`;
   } else if(data.morodok.hasActive || data.pawn.hasActive){
-    html += `<div class="banner caution">该客户仅在一个系统有未结清贷款，暂无交叉风险，请正常核实其还款能力。</div>`;
+    html += `<div class="banner caution">${esc(t('bannerOneActive'))}</div>`;
   } else if(data.morodok.matches.length===0 && data.pawn.matches.length===0 && data.legacy.matches.length===0){
-    html += `<div class="banner safe">未在任一系统或历史名单查到该客户的记录。</div>`;
+    html += `<div class="banner safe">${esc(t('bannerNone'))}</div>`;
   } else {
-    html += `<div class="banner safe">未发现未结清的交叉贷款记录。</div>`;
+    html += `<div class="banner safe">${esc(t('bannerClear'))}</div>`;
   }
 
   if(data.legacyRisk){
-    html += `<div class="banner caution">📋 提示：该客户在历史名单中曾有锁机/逾期记录（无金额明细，仅供参考）。</div>`;
+    html += `<div class="banner caution">${esc(t('bannerLegacyRisk'))}</div>`;
   }
 
-  html += renderSysCard('手机分期 MORODOK', data.morodok);
-  html += renderSysCard('小贷/抵押 PAWN', data.pawn);
+  html += renderSysCard(t('sysMorodok'), data.morodok);
+  html += renderSysCard(t('sysPawn'), data.pawn);
   html += renderLegacyCard(data.legacy);
 
   resultEl.innerHTML = html;
@@ -131,55 +278,63 @@ function render(data){
 function renderSysCard(title, sys){
   let inner = '';
   if(!sys.available){
-    inner = `<div class="unavailable">⚠️ 无法连接该系统，暂时无法核实（可能是系统休眠中，请稍后重试）</div>`;
+    inner = `<div class="unavailable">${esc(t('unavailable'))}</div>`;
   } else if(sys.matches.length===0){
-    inner = `<div class="empty">未查到相关记录</div>`;
+    inner = `<div class="empty">${esc(t('empty'))}</div>`;
   } else {
     inner = `<table><thead><tr>
-      <th>客户</th><th>电话</th><th>状态</th><th>金额</th><th>日期</th><th>机型/店铺</th><th>匹配方式</th>
+      <th>${esc(t('thCustomer'))}</th><th>${esc(t('thPhone'))}</th><th>${esc(t('thStatus'))}</th><th>${esc(t('thAmount'))}</th><th>${esc(t('thDate'))}</th><th>${esc(t('thModelShop'))}</th><th>${esc(t('thMatch'))}</th>
     </tr></thead><tbody>`;
     sys.matches.forEach(m => {
-      const pill = m.active ? `<span class="status-pill status-active">${esc(m.status||'进行中')}</span>` : `<span class="status-pill status-clear">${esc(m.status||'已结清')}</span>`;
+      const label = translateSrcStatus(m.status) || m.status || (m.active ? t('srcActive') : t('srcSettled'));
+      const pill = m.active ? `<span class="status-pill status-active">${esc(label)}</span>` : `<span class="status-pill status-clear">${esc(label)}</span>`;
+      const matchLabel = m.matchType==='phone'?t('matchPhone'):m.matchType==='id'?t('matchId'):t('matchName');
       inner += `<tr>
         <td>${esc(m.customer)}</td>
-        <td>${esc(m.phone)}${m.idNumber?`<br><span class="matchtype">身份证:${esc(m.idNumber)}</span>`:''}</td>
+        <td>${esc(m.phone)}${m.idNumber?`<br><span class="matchtype">${esc(t('thIdNumber'))}:${esc(m.idNumber)}</span>`:''}</td>
         <td>${pill}</td>
         <td>$${esc(m.amount)}</td>
         <td>${esc(m.date)}</td>
         <td>${esc(m.model)} ${esc(m.shop)}</td>
-        <td class="matchtype">${m.matchType==='phone'?'电话匹配':m.matchType==='id'?'身份证匹配':'姓名匹配'}</td>
+        <td class="matchtype">${matchLabel}</td>
       </tr>`;
     });
     inner += '</tbody></table>';
   }
-  const badge = !sys.available ? '' : (sys.hasActive ? '<span class="badge active">有未结清</span>' : '<span class="badge clear">无未结清</span>');
+  const badge = !sys.available ? '' : (sys.hasActive ? `<span class="badge active">${esc(t('badgeActive'))}</span>` : `<span class="badge clear">${esc(t('badgeClear'))}</span>`);
   return `<div class="sysCard"><h3>${esc(title)} ${badge}</h3>${inner}</div>`;
 }
 
+const STATUS_CAT_KEY = { settled:'statusSettled', locked:'statusLocked', other:'statusOther', unmarked:'statusUnmarked' };
+
 function renderLegacyCard(legacy){
   let inner = '';
+  const title = t('legacyLabel').replace('{count}', legacy.count ?? '');
   if(!legacy.available){
-    inner = `<div class="unavailable">历史名单未加载</div>`;
+    inner = `<div class="unavailable">${esc(t('legacyUnavailable'))}</div>`;
   } else if(legacy.matches.length===0){
-    inner = `<div class="empty">未查到相关记录</div>`;
+    inner = `<div class="empty">${esc(t('empty'))}</div>`;
   } else {
-    inner = `<table><thead><tr><th>姓名</th><th>身份证号</th><th>性别</th><th>历史状态</th><th>匹配方式</th></tr></thead><tbody>`;
+    inner = `<table><thead><tr><th>${esc(t('thName'))}</th><th>${esc(t('thIdNumber'))}</th><th>${esc(t('thGender'))}</th><th>${esc(t('thHistStatus'))}</th><th>${esc(t('thMatch'))}</th></tr></thead><tbody>`;
     legacy.matches.forEach(m => {
       const cls = m.statusCategory==='locked' ? 'status-locked' : m.statusCategory==='settled' ? 'status-clear' : 'status-other';
+      const label = t(STATUS_CAT_KEY[m.statusCategory] || 'statusOther');
+      const matchLabel = m.matchType==='id'?t('matchId'):t('matchName');
       inner += `<tr>
         <td>${esc(m.customer)}</td>
         <td>${esc(m.idNumber)}</td>
         <td>${esc(m.gender)}</td>
-        <td><span class="status-pill ${cls}">${esc(m.status)}</span></td>
-        <td class="matchtype">${m.matchType==='id'?'身份证匹配':'姓名匹配'}</td>
+        <td><span class="status-pill ${cls}">${esc(label)}</span></td>
+        <td class="matchtype">${matchLabel}</td>
       </tr>`;
     });
     inner += '</tbody></table>';
   }
-  return `<div class="sysCard"><h3>${esc(legacy.label)}</h3>${inner}</div>`;
+  return `<div class="sysCard"><h3>${esc(title)}</h3>${inner}</div>`;
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+  renderChrome();
   ['qName','qPhone','qId'].forEach(id => {
     document.getElementById(id).addEventListener('keydown', e => { if(e.key==='Enter') doSearch(); });
   });
