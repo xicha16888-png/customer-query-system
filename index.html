@@ -48,6 +48,7 @@
   .status-clear{background:#dcfce7;color:#15803d;}
   .status-blacklist{background:#7f1d1d;color:#fff;}
   .status-normal{background:#e2e8f0;color:var(--muted);}
+  .status-overdue{background:#dc2626;color:#fff;font-weight:700;}
   tr.row-blacklist{background:#fef2f2;}
   .matchtype{font-size:11px;color:var(--muted);}
   .empty{color:var(--muted);font-size:13px;padding:6px 0;}
@@ -81,9 +82,6 @@
 <script>
 const API_BASE = '';
 
-// ══════════════════════════════════════════
-// 多语言：高棉语(km)为默认/主要语言，其次英文(en)，最后中文(zh)
-// ══════════════════════════════════════════
 const LANGS = ['km','en','zh'];
 const LANG_NAMES = { km: 'ខ្មែរ', en: 'English', zh: '中文' };
 
@@ -114,12 +112,14 @@ const I18N = {
     badgeActive: 'មានបំណុលមិនទាន់សង',
     badgeClear: 'គ្មានបំណុលមិនទាន់សង',
     badgeBlacklist: 'មានបញ្ជីខ្មៅ',
+    badgeOverdue: 'ហួសកាលកំណត់',
     thCustomer: 'អតិថិជន', thPhone: 'លេខទូរស័ព្ទ', thStatus: 'ស្ថានភាព', thAmount: 'ចំនួនទឹកប្រាក់',
     thDate: 'កាលបរិច្ឆេទ', thModelShop: 'ម៉ូដែល/ហាង', thMatch: 'របៀបផ្គូផ្គង',
     thName: 'ឈ្មោះ', thIdNumber: 'អត្តសញ្ញាណប័ណ្ណ', thGender: 'ភេទ', thHistStatus: 'ស្ថានភាពបញ្ជី',
     matchPhone: 'ផ្គូផ្គងទូរស័ព្ទ', matchId: 'ផ្គូផ្គងអត្តសញ្ញាណប័ណ្ណ', matchName: 'ផ្គូផ្គងឈ្មោះ',
     blacklistYes: '🚨 បញ្ជីខ្មៅ', blacklistNo: 'ធម្មតា',
-    srcActive: 'កំពុងដំណើរការ', srcSettled: 'ទូទាត់រួច', srcEarlySettled: 'ទូទាត់មុនកាលកំណត់', srcOverdue: 'ហួសកាលកំណត់'
+    srcActive: 'កំពុងដំណើរការ', srcSettled: 'ទូទាត់រួច', srcEarlySettled: 'ទូទាត់មុនកាលកំណត់', srcOverdue: 'ហួសកាលកំណត់',
+    overdueDaysLabel: 'ហួសកាលកំណត់ {days} ថ្ងៃ'
   },
   en: {
     title: 'Customer Cross-Check System',
@@ -147,12 +147,14 @@ const I18N = {
     badgeActive: 'Has unpaid loan',
     badgeClear: 'No unpaid loan',
     badgeBlacklist: 'BLACKLISTED',
+    badgeOverdue: 'Overdue',
     thCustomer: 'Customer', thPhone: 'Phone', thStatus: 'Status', thAmount: 'Amount',
     thDate: 'Date', thModelShop: 'Model/Shop', thMatch: 'Match type',
     thName: 'Name', thIdNumber: 'ID Number', thGender: 'Gender', thHistStatus: 'List status',
     matchPhone: 'Phone match', matchId: 'ID match', matchName: 'Name match',
     blacklistYes: '🚨 Blacklist', blacklistNo: 'Normal',
-    srcActive: 'In progress', srcSettled: 'Settled', srcEarlySettled: 'Settled early', srcOverdue: 'Overdue'
+    srcActive: 'In progress', srcSettled: 'Settled', srcEarlySettled: 'Settled early', srcOverdue: 'Overdue',
+    overdueDaysLabel: 'Overdue {days} days'
   },
   zh: {
     title: '客户交叉查询系统',
@@ -180,12 +182,14 @@ const I18N = {
     badgeActive: '有未结清',
     badgeClear: '无未结清',
     badgeBlacklist: '黑名单',
+    badgeOverdue: '有逾期',
     thCustomer: '客户', thPhone: '电话', thStatus: '状态', thAmount: '金额',
     thDate: '日期', thModelShop: '机型/店铺', thMatch: '匹配方式',
     thName: '姓名', thIdNumber: '身份证号', thGender: '性别', thHistStatus: '名单状态',
     matchPhone: '电话匹配', matchId: '身份证匹配', matchName: '姓名匹配',
     blacklistYes: '🚨 黑名单', blacklistNo: '正常',
-    srcActive: '进行中', srcSettled: '已结清', srcEarlySettled: '提前结清', srcOverdue: '逾期'
+    srcActive: '进行中', srcSettled: '已结清', srcEarlySettled: '提前结清', srcOverdue: '逾期',
+    overdueDaysLabel: '逾期{days}天'
   }
 };
 
@@ -290,8 +294,14 @@ function renderSysCard(title, sys){
       <th>${esc(t('thCustomer'))}</th><th>${esc(t('thPhone'))}</th><th>${esc(t('thStatus'))}</th><th>${esc(t('thAmount'))}</th><th>${esc(t('thDate'))}</th><th>${esc(t('thModelShop'))}</th><th>${esc(t('thMatch'))}</th>
     </tr></thead><tbody>`;
     sys.matches.forEach(m => {
-      const label = translateSrcStatus(m.status) || m.status || (m.active ? t('srcActive') : t('srcSettled'));
-      const pill = m.active ? `<span class="status-pill status-active">${esc(label)}</span>` : `<span class="status-pill status-clear">${esc(label)}</span>`;
+      let pill;
+      if(m.isOverdue){
+        const odLabel = t('overdueDaysLabel').replace('{days}', m.overdueDays);
+        pill = `<span class="status-pill status-overdue">${esc(odLabel)}</span>`;
+      } else {
+        const label = translateSrcStatus(m.status) || m.status || (m.active ? t('srcActive') : t('srcSettled'));
+        pill = m.active ? `<span class="status-pill status-active">${esc(label)}</span>` : `<span class="status-pill status-clear">${esc(label)}</span>`;
+      }
       const matchLabel = m.matchType==='phone'?t('matchPhone'):m.matchType==='id'?t('matchId'):t('matchName');
       inner += `<tr>
         <td>${esc(m.customer)}</td>
@@ -305,7 +315,12 @@ function renderSysCard(title, sys){
     });
     inner += '</tbody></table>';
   }
-  const badge = !sys.available ? '' : (sys.hasActive ? `<span class="badge active">${esc(t('badgeActive'))}</span>` : `<span class="badge clear">${esc(t('badgeClear'))}</span>`);
+  let badge = '';
+  if(sys.available){
+    if(sys.hasOverdue) badge = `<span class="badge active">${esc(t('badgeOverdue'))}</span>`;
+    else if(sys.hasActive) badge = `<span class="badge active">${esc(t('badgeActive'))}</span>`;
+    else badge = `<span class="badge clear">${esc(t('badgeClear'))}</span>`;
+  }
   return `<div class="sysCard"><h3>${esc(title)} ${badge}</h3>${inner}</div>`;
 }
 
