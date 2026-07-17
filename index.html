@@ -32,19 +32,23 @@
   .banner.risk{background:#fef2f2;border:1.5px solid var(--danger);color:var(--danger);display:block;}
   .banner.safe{background:#f0fdf4;border:1.5px solid var(--ok);color:var(--ok);display:block;}
   .banner.caution{background:#fffbeb;border:1.5px solid var(--warn);color:#b45309;display:block;}
+  .banner.blacklist{background:#7f1d1d;border:2px solid #450a0a;color:#fff;display:block;font-size:17px;animation:pulseAlert 1.2s infinite;}
+  @keyframes pulseAlert{0%,100%{box-shadow:0 0 0 0 rgba(127,29,29,.6);}50%{box-shadow:0 0 0 8px rgba(127,29,29,0);}}
   .sysCard{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px 18px;margin-bottom:14px;}
   .sysCard h3{margin:0 0 10px;font-size:15px;display:flex;align-items:center;gap:8px;}
   .badge{display:inline-block;font-size:12px;padding:2px 8px;border-radius:999px;font-weight:600;}
   .badge.active{background:#fee2e2;color:var(--danger);}
   .badge.clear{background:#f1f5f9;color:var(--muted);}
+  .badge.blacklist{background:#7f1d1d;color:#fff;}
   table{width:100%;border-collapse:collapse;font-size:13px;}
   th,td{text-align:left;padding:7px 6px;border-bottom:1px solid var(--border);}
   th{color:var(--muted);font-weight:600;font-size:12px;}
   .status-pill{padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600;white-space:nowrap;}
   .status-active{background:#fef3c7;color:#b45309;}
   .status-clear{background:#dcfce7;color:#15803d;}
-  .status-locked{background:#fee2e2;color:#b91c1c;}
-  .status-other{background:#e0e7ff;color:#4338ca;}
+  .status-blacklist{background:#7f1d1d;color:#fff;}
+  .status-normal{background:#e2e8f0;color:var(--muted);}
+  tr.row-blacklist{background:#fef2f2;}
   .matchtype{font-size:11px;color:var(--muted);}
   .empty{color:var(--muted);font-size:13px;padding:6px 0;}
   .unavailable{color:var(--warn);font-size:12px;}
@@ -96,11 +100,11 @@ const I18N = {
     footer: 'ទិន្នន័យទាញយកផ្ទាល់ពី morodok-system និង pawn-system ព្រមទាំងបញ្ជីអតិថិជនចាស់ដែលបាននាំចូលឋិតិវន្ត។ ប្រព័ន្ធនេះមិនរក្សាទុកទិន្នន័យអតិថិជនណាមួយឡើយ។',
     errNoInput: 'សូមបញ្ចូលឈ្មោះ លេខទូរស័ព្ទ ឬលេខអត្តសញ្ញាណប័ណ្ណ យ៉ាងហោចណាស់មួយ',
     errFail: 'ស្វែងរកបរាជ័យ៖ ',
+    bannerBlacklist: '🚨 អតិថិជននេះស្ថិតក្នុងបញ្ជីខ្មៅ (BLACKLIST)! ហាមឃាត់មិនឱ្យខ្ចីលុយ ឬទិញទូរស័ព្ទបង់រំលស់ដាច់ខាត!',
     bannerCrossRisk: '⚠️ ប្រយ័ត្ន៖ អតិថិជននេះមានបំណុលមិនទាន់សងទាំងក្នុងប្រព័ន្ធទូរស័ព្ទបង់រំលស់ និងកម្ចីតូច/បញ្ចាំ! សូមពិនិត្យដោយប្រុងប្រយ័ត្ន!',
     bannerOneActive: 'អតិថិជននេះមានបំណុលមិនទាន់សងតែក្នុងប្រព័ន្ធមួយប៉ុណ្ណោះ គ្មានហានិភ័យឆ្លងប្រព័ន្ធទេ សូមផ្ទៀងផ្ទាត់លទ្ធភាពសងបំណុលដូចធម្មតា។',
     bannerNone: 'រកមិនឃើញកំណត់ត្រាអតិថិជននេះទាំងក្នុងប្រព័ន្ធណាមួយ ឬបញ្ជីអតិថិជនចាស់ទេ។',
     bannerClear: 'មិនមានកំណត់ត្រាបំណុលឆ្លងប្រព័ន្ធដែលមិនទាន់សងទេ។',
-    bannerLegacyRisk: '📋 ចំណាំ៖ អតិថិជននេះធ្លាប់មានកំណត់ត្រាចាក់សោទូរស័ព្ទ/ហួសកាលកំណត់ក្នុងបញ្ជីចាស់ (គ្មានលម្អិតចំនួនទឹកប្រាក់ ជាព័ត៌មានយោងតែប៉ុណ្ណោះ)។',
     sysMorodok: 'ទូរស័ព្ទបង់រំលស់ (MORODOK)',
     sysPawn: 'កម្ចីតូច/បញ្ចាំ (PAWN)',
     legacyLabel: 'បញ្ជីយោងអតិថិជនចាស់ ({count} កំណត់ត្រា មានតែឈ្មោះ/លេខអត្តសញ្ញាណប័ណ្ណ/ស្ថានភាព គ្មានចំនួនទឹកប្រាក់)',
@@ -109,12 +113,12 @@ const I18N = {
     legacyUnavailable: 'បញ្ជីអតិថិជនចាស់មិនទាន់ផ្ទុក',
     badgeActive: 'មានបំណុលមិនទាន់សង',
     badgeClear: 'គ្មានបំណុលមិនទាន់សង',
+    badgeBlacklist: 'មានបញ្ជីខ្មៅ',
     thCustomer: 'អតិថិជន', thPhone: 'លេខទូរស័ព្ទ', thStatus: 'ស្ថានភាព', thAmount: 'ចំនួនទឹកប្រាក់',
     thDate: 'កាលបរិច្ឆេទ', thModelShop: 'ម៉ូដែល/ហាង', thMatch: 'របៀបផ្គូផ្គង',
-    thName: 'ឈ្មោះ', thIdNumber: 'អត្តសញ្ញាណប័ណ្ណ', thGender: 'ភេទ', thHistStatus: 'ស្ថានភាពប្រវត្តិ',
+    thName: 'ឈ្មោះ', thIdNumber: 'អត្តសញ្ញាណប័ណ្ណ', thGender: 'ភេទ', thHistStatus: 'ស្ថានភាពបញ្ជី',
     matchPhone: 'ផ្គូផ្គងទូរស័ព្ទ', matchId: 'ផ្គូផ្គងអត្តសញ្ញាណប័ណ្ណ', matchName: 'ផ្គូផ្គងឈ្មោះ',
-    statusSettled: 'ទូទាត់រួច(ប្រវត្តិ)', statusLocked: 'ចាក់សោ/ហួសកាលកំណត់(ប្រវត្តិ)',
-    statusOther: 'ចំណាំផ្សេង(ប្រវត្តិ)', statusUnmarked: 'គ្មានសម្គាល់(ប្រវត្តិ)',
+    blacklistYes: '🚨 បញ្ជីខ្មៅ', blacklistNo: 'ធម្មតា',
     srcActive: 'កំពុងដំណើរការ', srcSettled: 'ទូទាត់រួច', srcEarlySettled: 'ទូទាត់មុនកាលកំណត់', srcOverdue: 'ហួសកាលកំណត់'
   },
   en: {
@@ -129,11 +133,11 @@ const I18N = {
     footer: 'Data is read live from morodok-system and pawn-system, plus a statically imported historical customer list. No customer data is stored by this system.',
     errNoInput: 'Please enter at least a name, phone, or ID number',
     errFail: 'Search failed: ',
+    bannerBlacklist: '🚨 This customer is on the BLACKLIST! Lending or phone installment is strictly forbidden!',
     bannerCrossRisk: '⚠️ Risk alert: this customer has unpaid loans in BOTH the Phone Installment and Micro-loan/Pawn systems. Please review carefully!',
     bannerOneActive: 'This customer has an unpaid loan in only one system — no cross-risk detected. Please verify repayment ability as usual.',
     bannerNone: 'No record found for this customer in either system or the historical list.',
     bannerClear: 'No unpaid cross-system loans found.',
-    bannerLegacyRisk: '📋 Note: this customer has a locked/overdue record in the historical list (no amount details, for reference only).',
     sysMorodok: 'Phone Installment (MORODOK)',
     sysPawn: 'Micro-loan / Pawn (PAWN)',
     legacyLabel: 'Historical reference list ({count} records, name/ID/status only, no amounts)',
@@ -142,12 +146,12 @@ const I18N = {
     legacyUnavailable: 'Historical list not loaded',
     badgeActive: 'Has unpaid loan',
     badgeClear: 'No unpaid loan',
+    badgeBlacklist: 'BLACKLISTED',
     thCustomer: 'Customer', thPhone: 'Phone', thStatus: 'Status', thAmount: 'Amount',
     thDate: 'Date', thModelShop: 'Model/Shop', thMatch: 'Match type',
-    thName: 'Name', thIdNumber: 'ID Number', thGender: 'Gender', thHistStatus: 'Historical status',
+    thName: 'Name', thIdNumber: 'ID Number', thGender: 'Gender', thHistStatus: 'List status',
     matchPhone: 'Phone match', matchId: 'ID match', matchName: 'Name match',
-    statusSettled: 'Settled (historical)', statusLocked: 'Locked/Overdue (historical)',
-    statusOther: 'Other note (historical)', statusUnmarked: 'Unmarked (historical)',
+    blacklistYes: '🚨 Blacklist', blacklistNo: 'Normal',
     srcActive: 'In progress', srcSettled: 'Settled', srcEarlySettled: 'Settled early', srcOverdue: 'Overdue'
   },
   zh: {
@@ -162,11 +166,11 @@ const I18N = {
     footer: '数据实时读取自 morodok-system 与 pawn-system，另含静态导入的历史客户名单，本系统不存储任何客户数据',
     errNoInput: '请至少输入姓名、电话或身份证号',
     errFail: '查询失败：',
+    bannerBlacklist: '🚨 该客户在黑名单中！严禁借款或办理手机分期！',
     bannerCrossRisk: '⚠️ 风险提示：该客户在「手机分期」和「小贷/抵押」两个系统均有未结清贷款，请谨慎审批！',
     bannerOneActive: '该客户仅在一个系统有未结清贷款，暂无交叉风险，请正常核实其还款能力。',
     bannerNone: '未在任一系统或历史名单查到该客户的记录。',
     bannerClear: '未发现未结清的交叉贷款记录。',
-    bannerLegacyRisk: '📋 提示：该客户在历史名单中曾有锁机/逾期记录（无金额明细，仅供参考）。',
     sysMorodok: '手机分期 MORODOK',
     sysPawn: '小贷/抵押 PAWN',
     legacyLabel: '历史名单参考（共{count}条静态导入，仅姓名/身份证号/状态，无金额）',
@@ -175,12 +179,12 @@ const I18N = {
     legacyUnavailable: '历史名单未加载',
     badgeActive: '有未结清',
     badgeClear: '无未结清',
+    badgeBlacklist: '黑名单',
     thCustomer: '客户', thPhone: '电话', thStatus: '状态', thAmount: '金额',
     thDate: '日期', thModelShop: '机型/店铺', thMatch: '匹配方式',
-    thName: '姓名', thIdNumber: '身份证号', thGender: '性别', thHistStatus: '历史状态',
+    thName: '姓名', thIdNumber: '身份证号', thGender: '性别', thHistStatus: '名单状态',
     matchPhone: '电话匹配', matchId: '身份证匹配', matchName: '姓名匹配',
-    statusSettled: '已结清(历史)', statusLocked: '锁机/逾期(历史)',
-    statusOther: '其他备注(历史)', statusUnmarked: '无标记(历史)',
+    blacklistYes: '🚨 黑名单', blacklistNo: '正常',
     srcActive: '进行中', srcSettled: '已结清', srcEarlySettled: '提前结清', srcOverdue: '逾期'
   }
 };
@@ -254,18 +258,18 @@ function render(data){
   const resultEl = document.getElementById('result');
   let html = '';
 
+  if(data.blacklistRisk){
+    html += `<div class="banner blacklist">${esc(t('bannerBlacklist'))}</div>`;
+  }
+
   if(data.crossRisk){
     html += `<div class="banner risk">${esc(t('bannerCrossRisk'))}</div>`;
   } else if(data.morodok.hasActive || data.pawn.hasActive){
     html += `<div class="banner caution">${esc(t('bannerOneActive'))}</div>`;
-  } else if(data.morodok.matches.length===0 && data.pawn.matches.length===0 && data.legacy.matches.length===0){
+  } else if(!data.blacklistRisk && data.morodok.matches.length===0 && data.pawn.matches.length===0 && data.legacy.matches.length===0){
     html += `<div class="banner safe">${esc(t('bannerNone'))}</div>`;
-  } else {
+  } else if(!data.blacklistRisk){
     html += `<div class="banner safe">${esc(t('bannerClear'))}</div>`;
-  }
-
-  if(data.legacyRisk){
-    html += `<div class="banner caution">${esc(t('bannerLegacyRisk'))}</div>`;
   }
 
   html += renderSysCard(t('sysMorodok'), data.morodok);
@@ -305,11 +309,10 @@ function renderSysCard(title, sys){
   return `<div class="sysCard"><h3>${esc(title)} ${badge}</h3>${inner}</div>`;
 }
 
-const STATUS_CAT_KEY = { settled:'statusSettled', locked:'statusLocked', other:'statusOther', unmarked:'statusUnmarked' };
-
 function renderLegacyCard(legacy){
   let inner = '';
   const title = t('legacyLabel').replace('{count}', legacy.count ?? '');
+  const hasBlacklistMatch = (legacy.matches||[]).some(m => m.isBlacklist);
   if(!legacy.available){
     inner = `<div class="unavailable">${esc(t('legacyUnavailable'))}</div>`;
   } else if(legacy.matches.length===0){
@@ -317,20 +320,22 @@ function renderLegacyCard(legacy){
   } else {
     inner = `<table><thead><tr><th>${esc(t('thName'))}</th><th>${esc(t('thIdNumber'))}</th><th>${esc(t('thGender'))}</th><th>${esc(t('thHistStatus'))}</th><th>${esc(t('thMatch'))}</th></tr></thead><tbody>`;
     legacy.matches.forEach(m => {
-      const cls = m.statusCategory==='locked' ? 'status-locked' : m.statusCategory==='settled' ? 'status-clear' : 'status-other';
-      const label = t(STATUS_CAT_KEY[m.statusCategory] || 'statusOther');
+      const rowCls = m.isBlacklist ? 'row-blacklist' : '';
+      const pillCls = m.isBlacklist ? 'status-blacklist' : 'status-normal';
+      const label = m.isBlacklist ? t('blacklistYes') : t('blacklistNo');
       const matchLabel = m.matchType==='id'?t('matchId'):t('matchName');
-      inner += `<tr>
+      inner += `<tr class="${rowCls}">
         <td>${esc(m.customer)}</td>
         <td>${esc(m.idNumber)}</td>
         <td>${esc(m.gender)}</td>
-        <td><span class="status-pill ${cls}">${esc(label)}</span></td>
+        <td><span class="status-pill ${pillCls}">${esc(label)}</span></td>
         <td class="matchtype">${matchLabel}</td>
       </tr>`;
     });
     inner += '</tbody></table>';
   }
-  return `<div class="sysCard"><h3>${esc(title)}</h3>${inner}</div>`;
+  const badge = hasBlacklistMatch ? `<span class="badge blacklist">${esc(t('badgeBlacklist'))}</span>` : '';
+  return `<div class="sysCard"><h3>${esc(title)} ${badge}</h3>${inner}</div>`;
 }
 
 document.addEventListener('DOMContentLoaded', () => {

@@ -18,11 +18,16 @@ const SOURCES = {
   }
 };
 
-let LEGACY = [];
+// ══════════════════════════════════════════
+// 历史客户名单（正常 + 黑名单），静态导入
+// customer-list.json 每条记录: { name, idNumber, gender, statusRaw, isBlacklist }
+// ══════════════════════════════════════════
+let CUSTOMER_LIST = [];
 try {
-  const raw = fs.readFileSync(path.join(__dirname, 'legacy-customers.json'), 'utf-8');
-  LEGACY = JSON.parse(raw);
-  console.log(`已加载历史客户名单 ${LEGACY.length} 条`);
+  const raw = fs.readFileSync(path.join(__dirname, 'customer-list.json'), 'utf-8');
+  CUSTOMER_LIST = JSON.parse(raw);
+  const blCount = CUSTOMER_LIST.filter(r => r.isBlacklist).length;
+  console.log(`已加载历史客户名单 ${CUSTOMER_LIST.length} 条（其中黑名单 ${blCount} 条）`);
 } catch (e) {
   console.error('加载历史客户名单失败:', e.message);
 }
@@ -134,16 +139,9 @@ function matchRecords(records, key, q) {
   return out;
 }
 
-const STATUS_LABEL = {
-  settled: '已结清(历史)',
-  locked: '锁机/逾期(历史)',
-  other: '其他备注(历史)',
-  unmarked: '无标记(历史)'
-};
-
-function matchLegacy(q) {
+function matchCustomerList(q) {
   const out = [];
-  for (const r of LEGACY) {
+  for (const r of CUSTOMER_LIST) {
     const recNameNorm = normName(r.name);
     const recIdFull = idKeyFull(r.idNumber);
     const recIdNoSuffix = idKeyNoSuffix(r.idNumber);
@@ -159,13 +157,14 @@ function matchLegacy(q) {
         customer: r.name,
         idNumber: r.idNumber,
         gender: r.gender,
-        status: STATUS_LABEL[r.statusCategory] || r.statusRaw,
-        statusCategory: r.statusCategory,
         statusRaw: r.statusRaw,
+        isBlacklist: !!r.isBlacklist,
         matchType
       });
     }
   }
+  // 黑名单排前面
+  out.sort((a, b) => (b.isBlacklist - a.isBlacklist));
   return out;
 }
 
@@ -187,11 +186,12 @@ app.get('/api/check', async (req, res) => {
 
   const morodokMatches = matchRecords(morodokRes.records, 'morodok', q);
   const pawnMatches = matchRecords(pawnRes.records, 'pawn', q);
-  const legacyMatches = matchLegacy(q);
+  const legacyMatches = matchCustomerList(q);
 
   const morodokActive = morodokMatches.some(m => m.active);
   const pawnActive = pawnMatches.some(m => m.active);
-  const legacyLocked = legacyMatches.some(m => m.statusCategory === 'locked');
+  const blacklistMatches = legacyMatches.filter(m => m.isBlacklist);
+  const blacklistRisk = blacklistMatches.length > 0;
 
   res.json({
     ok: true,
@@ -211,21 +211,24 @@ app.get('/api/check', async (req, res) => {
       hasActive: pawnActive
     },
     legacy: {
-      label: `历史名单参考（共${LEGACY.length}条静态导入，仅姓名/身份证号/状态，无金额）`,
-      count: LEGACY.length,
-      available: LEGACY.length > 0,
-      matches: legacyMatches,
-      hasLocked: legacyLocked
+      count: CUSTOMER_LIST.length,
+      available: CUSTOMER_LIST.length > 0,
+      matches: legacyMatches
     },
     crossRisk: morodokActive && pawnActive,
-    legacyRisk: legacyLocked
+    blacklistRisk: blacklistRisk
   });
 });
 
-app.get('/api/health', (req, res) => res.json({ status: 'ok', time: new Date().toISOString(), legacyCount: LEGACY.length }));
+app.get('/api/health', (req, res) => res.json({
+  status: 'ok',
+  time: new Date().toISOString(),
+  customerListCount: CUSTOMER_LIST.length,
+  blacklistCount: CUSTOMER_LIST.filter(r => r.isBlacklist).length
+}));
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log('Customer Cross-Check System');
   console.log('Port: ' + PORT);
-  console.log('Legacy records: ' + LEGACY.length);
+  console.log('Customer list records: ' + CUSTOMER_LIST.length);
 });
