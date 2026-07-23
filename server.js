@@ -19,14 +19,23 @@ const SOURCES = {
 };
 
 // ══════════════════════════════════════════
-// 历史客户名单（黑名单 / 已结清白名单 / 仍在还款中），静态导入，来自手机抵押(PAWN)老客户表
+// 管理员密码 + GitHub 自动提交配置
+// ══════════════════════════════════════════
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '123456';
+const GITHUB_TOKEN = (process.env.GITHUB_TOKEN || '').trim();
+const GITHUB_OWNER = process.env.GITHUB_OWNER || 'xicha16888-png';
+const GITHUB_REPO = process.env.GITHUB_REPO || 'customer-query-system';
+const GITHUB_PATH = process.env.GITHUB_PATH || 'customer-list.json';
+const GITHUB_BRANCH = process.env.GITHUB_BRANCH || 'main';
+
+// ══════════════════════════════════════════
+// 历史客户名单（黑名单 / 已结清白名单 / 仍在还款中），静态导入 + 后台手动维护
 // customer-list.json 每条记录: { name, idNumber, gender, statusRaw, isBlacklist }
-// 非黑名单里：statusRaw 含 "end"(不分大小写) = 已结清/真正白名单，两边都能借
-//            不含 "end" (含空白) = 当时仍在还款中，不能在手机分期(MORODOK)新增贷款
 // ══════════════════════════════════════════
 let CUSTOMER_LIST = [];
+const CUSTOMER_LIST_PATH = path.join(__dirname, 'customer-list.json');
 try {
-  const raw = fs.readFileSync(path.join(__dirname, 'customer-list.json'), 'utf-8');
+  const raw = fs.readFileSync(CUSTOMER_LIST_PATH, 'utf-8');
   CUSTOMER_LIST = JSON.parse(raw);
   const blCount = CUSTOMER_LIST.filter(r => r.isBlacklist).length;
   console.log('已加载历史客户名单 ' + CUSTOMER_LIST.length + ' 条（其中黑名单 ' + blCount + ' 条）');
@@ -195,13 +204,11 @@ function matchCustomerList(q) {
         gender: r.gender,
         statusRaw: r.statusRaw,
         isBlacklist: !!r.isBlacklist,
-        // 非黑名单时才有意义：true=已结清(真白名单)，false=当时仍在还款中
         isSettled: r.isBlacklist ? null : settled,
         matchType
       });
     }
   }
-  // 黑名单排最前，其次"仍在还款中"的，最后是已结清的
   const weight = m => m.isBlacklist ? 2 : (m.isSettled === false ? 1 : 0);
   out.sort((a, b) => weight(b) - weight(a));
   return out;
@@ -233,13 +240,8 @@ app.get('/api/check', async (req, res) => {
   const pawnOverdue = pawnMatches.some(m => m.isOverdue);
   const blacklistMatches = legacyMatches.filter(m => m.isBlacklist);
   const blacklistRisk = blacklistMatches.length > 0;
-  // 历史名单里(非黑名单)是否有"当时仍在还款中"的记录 —— 这个名单来自手机抵押(PAWN)老客户表
   const legacyPawnUnsettled = legacyMatches.some(m => !m.isBlacklist && m.isSettled === false);
 
-  // 硬拦截规则：
-  // - 黑名单 → 两边都不能借
-  // - PAWN 有未结清(实时) 或 历史名单显示仍在还款中 → 不能新增手机分期(MORODOK)
-  // - MORODOK 有未结清(实时) → 不能新增小贷/抵押(PAWN)
   const blockMorodok = blacklistRisk || pawnActive || legacyPawnUnsettled;
   const blockPawn = blacklistRisk || morodokActive;
 
@@ -280,11 +282,139 @@ app.get('/api/health', (req, res) => res.json({
   status: 'ok',
   time: new Date().toISOString(),
   customerListCount: CUSTOMER_LIST.length,
-  blacklistCount: CUSTOMER_LIST.filter(r => r.isBlacklist).length
+  blacklistCount: CUSTOMER_LIST.filter(r => r.isBlacklist).length,
+  githubConfigured: !!GITHUB_TOKEN
 }));
+
+// ══════════════════════════════════════════
+// 管理员：密码验证 + 手动新增/编辑客户 + 自动提交回 GitHub
+// ══════════════════════════════════════════
+function checkPassword(req, res) {
+  const pw = (req.body && req.body.password) || '';
+  if (pw !== ADMIN_PASSWORD) {
+    res.status(401).json({ ok: false, error: '密码错误' });
+    return false;
+  }
+  return true;
+}
+
+function findExistingIndex(name, idNumber) {
+  const qId = idKeyFull(idNumber);
+  const qIdNoSuffix = idKeyNoSuffix(idNumber);
+  const qName = normName(name);
+  if (qId && qId.length >= 6) {
+    const idx = CUSTOMER_LIST.findIndex(r => {
+      const rid = idKeyFull(r.idNumber);
+      const ridNoSuffix = idKeyNoSuffix(r.idNumber);
+      return rid === qId || ridNoSuffix === qIdNoSuffix;
+    });
+    if (idx >= 0) return idx;
+  }
+  if (qName) {
+    const idx = CUSTOMER_LIST.findIndex(r => normName(r.name) === qName);
+    if (idx >= 0) return idx;
+  }
+  return -1;
+}
+
+async function commitToGithub() {
+  if (!GITHUB_TOKEN) {
+    return { ok: false, error: '未配置 GITHUB_TOKEN，本次修改只在服务器内存里生效，重启会丢失' };
+  }
+  const apiBase = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${GITHUB_PATH}`;
+  const headers = {
+    'Authorization': `token ${GITHUB_TOKEN}`,
+    'Accept': 'application/vnd.github+json',
+    'User-Agent': 'customer-query-system'
+  };
+  try {
+    // 1) 拿当前文件的 sha
+    const getRes = await fetch(`${apiBase}?ref=${GITHUB_BRANCH}`, { headers });
+    if (!getRes.ok) throw new Error('读取 GitHub 文件失败: HTTP ' + getRes.status);
+    const getData = await getRes.json();
+    const sha = getData.sha;
+
+    // 2) 提交更新
+    const content = Buffer.from(JSON.stringify(CUSTOMER_LIST, null, 0), 'utf-8').toString('base64');
+    const putRes = await fetch(apiBase, {
+      method: 'PUT',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        message: '管理面板更新客户名单 ' + new Date().toISOString(),
+        content,
+        sha,
+        branch: GITHUB_BRANCH
+      })
+    });
+    if (!putRes.ok) {
+      const errBody = await putRes.text();
+      throw new Error('提交 GitHub 失败: HTTP ' + putRes.status + ' ' + errBody);
+    }
+    return { ok: true };
+  } catch (e) {
+    console.error('commitToGithub 失败:', e.message);
+    return { ok: false, error: e.message };
+  }
+}
+
+// 查找已有记录，方便添加前先核对是否已存在
+app.post('/api/admin/lookup', (req, res) => {
+  if (!checkPassword(req, res)) return;
+  const name = (req.body.name || '').trim();
+  const idNumber = (req.body.idNumber || '').trim();
+  const idx = findExistingIndex(name, idNumber);
+  if (idx >= 0) {
+    res.json({ ok: true, found: true, record: CUSTOMER_LIST[idx] });
+  } else {
+    res.json({ ok: true, found: false });
+  }
+});
+
+// 新增或更新一条客户记录
+app.post('/api/admin/upsert', async (req, res) => {
+  if (!checkPassword(req, res)) return;
+  const name = (req.body.name || '').trim();
+  const idNumber = (req.body.idNumber || '').trim();
+  const gender = (req.body.gender || '').trim();
+  const statusRaw = (req.body.statusRaw || '').trim();
+  const isBlacklist = !!req.body.isBlacklist;
+
+  if (!name) {
+    return res.status(400).json({ ok: false, error: '请填写姓名' });
+  }
+
+  const idx = findExistingIndex(name, idNumber);
+  const record = { name, idNumber, gender, statusRaw, isBlacklist };
+  let action;
+  if (idx >= 0) {
+    CUSTOMER_LIST[idx] = record;
+    action = 'updated';
+  } else {
+    CUSTOMER_LIST.push(record);
+    action = 'added';
+  }
+
+  // 本地也存一份（尽力而为，Render 重启会丢，靠 GitHub 提交才是真的持久化）
+  try {
+    fs.writeFileSync(CUSTOMER_LIST_PATH, JSON.stringify(CUSTOMER_LIST), 'utf-8');
+  } catch (e) {
+    console.error('本地写入 customer-list.json 失败:', e.message);
+  }
+
+  const gitResult = await commitToGithub();
+
+  res.json({
+    ok: true,
+    action,
+    total: CUSTOMER_LIST.length,
+    githubCommitted: gitResult.ok,
+    githubError: gitResult.ok ? null : gitResult.error
+  });
+});
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log('Customer Cross-Check System');
   console.log('Port: ' + PORT);
   console.log('Customer list records: ' + CUSTOMER_LIST.length);
+  console.log('GitHub auto-commit: ' + (GITHUB_TOKEN ? 'enabled' : 'DISABLED (no GITHUB_TOKEN)'));
 });

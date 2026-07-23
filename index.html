@@ -57,6 +57,23 @@
   .empty{color:var(--muted);font-size:13px;padding:6px 0;}
   .unavailable{color:var(--warn);font-size:12px;}
   footer{text-align:center;color:var(--muted);font-size:11px;margin-top:30px;}
+  .adminLinkRow{text-align:center;margin-top:10px;}
+  .adminLink{background:none;border:none;color:var(--muted);font-size:12px;cursor:pointer;text-decoration:underline;}
+  .adminPanel{max-width:480px;margin:16px auto 0;background:var(--card);border:1px solid var(--border);border-radius:12px;padding:18px;display:none;}
+  .adminPanel.open{display:block;}
+  .adminPanel h4{margin:0 0 12px;font-size:14px;}
+  .adminField{margin-bottom:10px;}
+  .adminField label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px;}
+  .adminField input[type=text], .adminField select{width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:14px;font-family:inherit;}
+  .adminField.checkboxRow{display:flex;align-items:center;gap:8px;}
+  .adminField.checkboxRow label{margin:0;}
+  .adminRowBtns{display:flex;gap:8px;margin-top:12px;}
+  .adminRowBtns button{flex:1;padding:9px;border:none;border-radius:6px;font-size:13px;cursor:pointer;font-family:inherit;font-weight:600;}
+  .btnPrimary{background:var(--primary);color:#fff;}
+  .btnSecondary{background:#e2e8f0;color:var(--text);}
+  .adminMsg{margin-top:10px;font-size:13px;padding:8px 10px;border-radius:6px;display:none;}
+  .adminMsg.ok{display:block;background:#f0fdf4;color:var(--ok);}
+  .adminMsg.err{display:block;background:#fef2f2;color:var(--danger);}
 </style>
 </head>
 <body>
@@ -80,6 +97,57 @@
   <div id="result"></div>
 
   <footer id="footerText"></footer>
+
+  <div class="adminLinkRow">
+    <button class="adminLink" onclick="toggleAdmin()">🔒 管理员 / Admin</button>
+  </div>
+
+  <div class="adminPanel" id="adminPanel">
+    <div id="adminLoginBox">
+      <h4>管理员登录</h4>
+      <div class="adminField">
+        <label>密码</label>
+        <input type="password" id="adminPwd" placeholder="请输入管理员密码">
+      </div>
+      <div class="adminRowBtns">
+        <button class="btnPrimary" onclick="adminUnlock()">解锁</button>
+      </div>
+      <div class="adminMsg" id="adminLoginMsg"></div>
+    </div>
+
+    <div id="adminFormBox" style="display:none">
+      <h4>手动新增 / 修改客户记录</h4>
+      <div class="adminField">
+        <label>姓名</label>
+        <input type="text" id="aName" placeholder="姓名（大小写不敏感）">
+      </div>
+      <div class="adminField">
+        <label>身份证号（可选，但填了匹配更准）</label>
+        <input type="text" id="aIdNumber" placeholder="身份证号">
+      </div>
+      <div class="adminField">
+        <label>性别</label>
+        <select id="aGender">
+          <option value="">未填写</option>
+          <option value="男">男</option>
+          <option value="女">女</option>
+        </select>
+      </div>
+      <div class="adminField">
+        <label>备注/状态（例如 end 表示已结清，留空表示仍在还款中）</label>
+        <input type="text" id="aStatusRaw" placeholder="留空 = 仍在还款中；填 end = 已结清">
+      </div>
+      <div class="adminField checkboxRow">
+        <input type="checkbox" id="aBlacklist">
+        <label for="aBlacklist">加入黑名单（两边都禁止借款）</label>
+      </div>
+      <div class="adminRowBtns">
+        <button class="btnSecondary" onclick="adminLookup()">先查一下是否已存在</button>
+        <button class="btnPrimary" onclick="adminUpsert()">保存</button>
+      </div>
+      <div class="adminMsg" id="adminFormMsg"></div>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -385,6 +453,92 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById(id).addEventListener('keydown', e => { if(e.key==='Enter') doSearch(); });
   });
 });
+
+// ══════════════════════════════════════════
+// 管理员面板：密码保护的手动新增/编辑客户
+// ══════════════════════════════════════════
+let _adminPwd = '';
+
+function toggleAdmin(){
+  const panel = document.getElementById('adminPanel');
+  panel.classList.toggle('open');
+}
+
+async function adminUnlock(){
+  const pwd = document.getElementById('adminPwd').value;
+  const msgEl = document.getElementById('adminLoginMsg');
+  msgEl.className = 'adminMsg'; msgEl.textContent = '';
+  if(!pwd){ msgEl.className = 'adminMsg err'; msgEl.textContent = '请输入密码'; return; }
+  // 用一次查找请求顺便验证密码对不对
+  try{
+    const res = await fetch(`${API_BASE}/api/admin/lookup`, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ password: pwd, name: '__ping__', idNumber: '' })
+    });
+    const data = await res.json();
+    if(res.status === 401){ msgEl.className = 'adminMsg err'; msgEl.textContent = '密码错误'; return; }
+    _adminPwd = pwd;
+    document.getElementById('adminLoginBox').style.display = 'none';
+    document.getElementById('adminFormBox').style.display = 'block';
+  }catch(e){
+    msgEl.className = 'adminMsg err'; msgEl.textContent = '连接失败：' + e.message;
+  }
+}
+
+async function adminLookup(){
+  const name = document.getElementById('aName').value.trim();
+  const idNumber = document.getElementById('aIdNumber').value.trim();
+  const msgEl = document.getElementById('adminFormMsg');
+  if(!name && !idNumber){ msgEl.className = 'adminMsg err'; msgEl.textContent = '请先填姓名或身份证号'; return; }
+  try{
+    const res = await fetch(`${API_BASE}/api/admin/lookup`, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ password: _adminPwd, name, idNumber })
+    });
+    const data = await res.json();
+    if(data.found){
+      document.getElementById('aGender').value = data.record.gender || '';
+      document.getElementById('aStatusRaw').value = data.record.statusRaw || '';
+      document.getElementById('aBlacklist').checked = !!data.record.isBlacklist;
+      msgEl.className = 'adminMsg ok'; msgEl.textContent = '已找到已有记录，字段已自动填入，保存会覆盖更新。';
+    } else {
+      msgEl.className = 'adminMsg ok'; msgEl.textContent = '没有找到已有记录，保存会新增一条。';
+    }
+  }catch(e){
+    msgEl.className = 'adminMsg err'; msgEl.textContent = '查找失败：' + e.message;
+  }
+}
+
+async function adminUpsert(){
+  const name = document.getElementById('aName').value.trim();
+  const idNumber = document.getElementById('aIdNumber').value.trim();
+  const gender = document.getElementById('aGender').value;
+  const statusRaw = document.getElementById('aStatusRaw').value.trim();
+  const isBlacklist = document.getElementById('aBlacklist').checked;
+  const msgEl = document.getElementById('adminFormMsg');
+  if(!name){ msgEl.className = 'adminMsg err'; msgEl.textContent = '请填写姓名'; return; }
+  msgEl.className = 'adminMsg'; msgEl.textContent = '保存中...';
+  try{
+    const res = await fetch(`${API_BASE}/api/admin/upsert`, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ password: _adminPwd, name, idNumber, gender, statusRaw, isBlacklist })
+    });
+    const data = await res.json();
+    if(!data.ok){ msgEl.className = 'adminMsg err'; msgEl.textContent = data.error || '保存失败'; return; }
+    let msg = (data.action === 'added' ? '✅ 已新增' : '✅ 已更新') + `，当前共 ${data.total} 条。`;
+    if(data.githubCommitted){
+      msg += ' 已自动提交到 GitHub，Render 正在重新部署，1-2分钟后生效。';
+    } else {
+      msg += ' ⚠️ 未能提交到 GitHub（' + (data.githubError||'未知原因') + '），这次修改重启服务器后会丢失，请检查 GITHUB_TOKEN 配置。';
+    }
+    msgEl.className = 'adminMsg ok'; msgEl.textContent = msg;
+  }catch(e){
+    msgEl.className = 'adminMsg err'; msgEl.textContent = '保存失败：' + e.message;
+  }
+}
 </script>
 </body>
 </html>
