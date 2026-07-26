@@ -412,6 +412,36 @@ app.post('/api/admin/upsert', async (req, res) => {
   });
 });
 
+// 删除一条客户记录
+app.post('/api/admin/delete', async (req, res) => {
+  if (!checkPassword(req, res)) return;
+  const name = (req.body.name || '').trim();
+  const idNumber = (req.body.idNumber || '').trim();
+
+  const idx = findExistingIndex(name, idNumber);
+  if (idx < 0) {
+    return res.status(404).json({ ok: false, error: '没有找到匹配的记录' });
+  }
+  const removed = CUSTOMER_LIST[idx];
+  CUSTOMER_LIST.splice(idx, 1);
+
+  try {
+    fs.writeFileSync(CUSTOMER_LIST_PATH, JSON.stringify(CUSTOMER_LIST), 'utf-8');
+  } catch (e) {
+    console.error('本地写入 customer-list.json 失败:', e.message);
+  }
+
+  const gitResult = await commitToGithub();
+
+  res.json({
+    ok: true,
+    removed,
+    total: CUSTOMER_LIST.length,
+    githubCommitted: gitResult.ok,
+    githubError: gitResult.ok ? null : gitResult.error
+  });
+});
+
 app.listen(PORT, '0.0.0.0', () => {
   console.log('Customer Cross-Check System');
   console.log('Port: ' + PORT);

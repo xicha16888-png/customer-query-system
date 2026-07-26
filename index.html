@@ -71,6 +71,7 @@
   .adminRowBtns button{flex:1;padding:9px;border:none;border-radius:6px;font-size:13px;cursor:pointer;font-family:inherit;font-weight:600;}
   .btnPrimary{background:var(--primary);color:#fff;}
   .btnSecondary{background:#e2e8f0;color:var(--text);}
+  .btnDanger{background:#fef2f2;color:var(--danger);border:1px solid var(--danger)!important;}
   .adminMsg{margin-top:10px;font-size:13px;padding:8px 10px;border-radius:6px;display:none;}
   .adminMsg.ok{display:block;background:#f0fdf4;color:var(--ok);}
   .adminMsg.err{display:block;background:#fef2f2;color:var(--danger);}
@@ -144,6 +145,9 @@
       <div class="adminRowBtns">
         <button class="btnSecondary" onclick="adminLookup()">先查一下是否已存在</button>
         <button class="btnPrimary" onclick="adminUpsert()">保存</button>
+      </div>
+      <div class="adminRowBtns">
+        <button class="btnDanger" onclick="adminDelete()">删除这条记录</button>
       </div>
       <div class="adminMsg" id="adminFormMsg"></div>
     </div>
@@ -537,6 +541,38 @@ async function adminUpsert(){
     msgEl.className = 'adminMsg ok'; msgEl.textContent = msg;
   }catch(e){
     msgEl.className = 'adminMsg err'; msgEl.textContent = '保存失败：' + e.message;
+  }
+}
+
+async function adminDelete(){
+  const name = document.getElementById('aName').value.trim();
+  const idNumber = document.getElementById('aIdNumber').value.trim();
+  const msgEl = document.getElementById('adminFormMsg');
+  if(!name && !idNumber){ msgEl.className = 'adminMsg err'; msgEl.textContent = '请先填姓名或身份证号，指明要删除哪条'; return; }
+  if(!confirm(`确定要删除「${name || idNumber}」这条记录吗？此操作无法撤销。`)) return;
+  msgEl.className = 'adminMsg'; msgEl.textContent = '删除中...';
+  try{
+    const res = await fetch(`${API_BASE}/api/admin/delete`, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ password: _adminPwd, name, idNumber })
+    });
+    const data = await res.json();
+    if(!data.ok){ msgEl.className = 'adminMsg err'; msgEl.textContent = data.error || '删除失败'; return; }
+    let msg = `✅ 已删除「${data.removed.name}」，当前共 ${data.total} 条。`;
+    if(data.githubCommitted){
+      msg += ' 已自动提交到 GitHub，Render 正在重新部署，1-2分钟后生效。';
+    } else {
+      msg += ' ⚠️ 未能提交到 GitHub（' + (data.githubError||'未知原因') + '），请检查 GITHUB_TOKEN 配置。';
+    }
+    msgEl.className = 'adminMsg ok'; msgEl.textContent = msg;
+    document.getElementById('aName').value = '';
+    document.getElementById('aIdNumber').value = '';
+    document.getElementById('aStatusRaw').value = '';
+    document.getElementById('aGender').value = '';
+    document.getElementById('aBlacklist').checked = false;
+  }catch(e){
+    msgEl.className = 'adminMsg err'; msgEl.textContent = '删除失败：' + e.message;
   }
 }
 </script>
