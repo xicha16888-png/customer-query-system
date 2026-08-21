@@ -75,6 +75,19 @@
   .adminMsg{margin-top:10px;font-size:13px;padding:8px 10px;border-radius:6px;display:none;}
   .adminMsg.ok{display:block;background:#f0fdf4;color:var(--ok);}
   .adminMsg.err{display:block;background:#fef2f2;color:var(--danger);}
+  .adminDivider{border:none;border-top:1px dashed var(--border);margin:18px 0;}
+  .bulkHint{color:var(--muted);font-size:12px;margin:4px 0 10px;line-height:1.6;}
+  .bulkLink{background:none;border:none;color:var(--primary);font-size:12px;cursor:pointer;text-decoration:underline;padding:0;}
+  .bulkFileRow{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px;}
+  .bulkFileRow input[type=file]{flex:1;min-width:180px;font-size:12px;}
+  .bulkPreview{display:none;margin-top:10px;}
+  .bulkPreview.show{display:block;}
+  .bulkPreviewMeta{font-size:12px;color:var(--text);margin-bottom:8px;}
+  .bulkPreviewMeta b{color:var(--primary);}
+  .bulkTableWrap{max-height:220px;overflow:auto;border:1px solid var(--border);border-radius:6px;}
+  .bulkTableWrap table{font-size:12px;}
+  .bulkTableWrap th,.bulkTableWrap td{padding:5px 6px;white-space:nowrap;}
+  .bulkErrList{margin:8px 0 0;padding-left:18px;font-size:11px;color:var(--warn);max-height:100px;overflow:auto;}
 </style>
 </head>
 <body>
@@ -150,10 +163,35 @@
         <button class="btnDanger" onclick="adminDelete()">删除这条记录</button>
       </div>
       <div class="adminMsg" id="adminFormMsg"></div>
+
+      <hr class="adminDivider">
+
+      <h4>批量导入（Excel / CSV）</h4>
+      <div class="bulkHint">
+        支持 .xlsx / .xls / .csv。表头随意，只要包含"姓名"（必填）即可，另外可选识别：身份证号、性别、备注/状态、黑名单（填 是/true/1 表示是黑名单）。
+        同一批次或已有名单中，姓名或身份证号匹配上的记录会被覆盖更新，其余新增。
+        <br><button class="bulkLink" onclick="downloadBulkTemplate()">下载模板 CSV</button>
+      </div>
+      <div class="bulkFileRow">
+        <input type="file" id="bulkFile" accept=".xlsx,.xls,.csv" onchange="handleBulkFile(this.files[0])">
+      </div>
+      <div class="bulkPreview" id="bulkPreview">
+        <div class="bulkPreviewMeta" id="bulkPreviewMeta"></div>
+        <div class="bulkTableWrap">
+          <table id="bulkPreviewTable"></table>
+        </div>
+        <ul class="bulkErrList" id="bulkErrList" style="display:none"></ul>
+        <div class="adminRowBtns">
+          <button class="btnPrimary" id="bulkConfirmBtn" onclick="submitBulkImport()">确认导入</button>
+          <button class="btnSecondary" onclick="cancelBulkImport()">取消</button>
+        </div>
+      </div>
+      <div class="adminMsg" id="bulkMsg"></div>
     </div>
   </div>
 </div>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
 const API_BASE = '';
 
@@ -573,6 +611,210 @@ async function adminDelete(){
     document.getElementById('aBlacklist').checked = false;
   }catch(e){
     msgEl.className = 'adminMsg err'; msgEl.textContent = '删除失败：' + e.message;
+  }
+}
+
+// ══════════════════════════════════════════
+// 批量导入：Excel/CSV 前端解析（SheetJS），预览后一次性提交给 /api/admin/bulk-upsert
+// ══════════════════════════════════════════
+let _bulkRecords = [];   // 待提交的合法记录
+let _bulkSkipped = 0;    // 缺姓名被跳过的行数
+
+const BULK_FIELD_ALIASES = {
+  name: ['姓名','名字','客户姓名','客户名','name','客户'],
+  idNumber: ['身份证号','身份证','身份证号码','证件号','证件号码','idnumber','id','idno'],
+  gender: ['性别','gender','sex'],
+  statusRaw: ['备注','状态','备注状态','备注/状态','statusraw','status','remark','note','备注(状态)'],
+  isBlacklist: ['黑名单','是否黑名单','isblacklist','blacklist']
+};
+
+function _bulkNorm(s){
+  return (s || '').toString().trim().toLowerCase().replace(/[\s_\-\/()（）]/g, '');
+}
+
+function downloadBulkTemplate(){
+  const csv = '姓名,身份证号,性别,备注/状态,黑名单\nKHAN SAVIN,170985857,男,end,否\nSAMPLE NAME,,,,\n';
+  const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = '客户名单导入模板.csv';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function buildBulkFieldMap(headers){
+  const map = {};
+  headers.forEach(h => {
+    const nh = _bulkNorm(h);
+    for (const field in BULK_FIELD_ALIASES) {
+      if (map[field]) continue;
+      if (BULK_FIELD_ALIASES[field].some(a => _bulkNorm(a) === nh)) {
+        map[field] = h;
+      }
+    }
+  });
+  return map;
+}
+
+function bulkRowToRecord(row, fieldMap){
+  const get = (field) => fieldMap[field] !== undefined ? row[fieldMap[field]] : '';
+  const name = (get('name') || '').toString().trim();
+  const idNumber = (get('idNumber') || '').toString().trim();
+  const gender = (get('gender') || '').toString().trim();
+  const statusRaw = (get('statusRaw') || '').toString().trim();
+  const blRaw = _bulkNorm(get('isBlacklist'));
+  const isBlacklist = ['是','true','1','yes','y','黑名单','黑'].includes(blRaw);
+  return { name, idNumber, gender, statusRaw, isBlacklist };
+}
+
+function handleBulkFile(file){
+  const msgEl = document.getElementById('bulkMsg');
+  msgEl.className = 'adminMsg'; msgEl.textContent = '';
+  cancelBulkImport(false);
+  if (!file) return;
+  if (typeof XLSX === 'undefined') {
+    msgEl.className = 'adminMsg err'; msgEl.textContent = '解析库未加载成功，请检查网络后刷新页面重试。';
+    return;
+  }
+
+  const reader = new FileReader();
+  reader.onerror = () => {
+    msgEl.className = 'adminMsg err'; msgEl.textContent = '读取文件失败，请重试。';
+  };
+  reader.onload = (e) => {
+    try {
+      const data = new Uint8Array(e.target.result);
+      const wb = XLSX.read(data, { type: 'array' });
+      const sheet = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(sheet, { defval: '', raw: false });
+      if (!rows.length) {
+        msgEl.className = 'adminMsg err'; msgEl.textContent = '文件里没有读到数据行。';
+        return;
+      }
+      const fieldMap = buildBulkFieldMap(Object.keys(rows[0]));
+      if (!fieldMap.name) {
+        msgEl.className = 'adminMsg err';
+        msgEl.textContent = '没能识别出"姓名"这一列，请检查表头，或点击"下载模板 CSV"参考格式。';
+        return;
+      }
+
+      const records = [];
+      let skipped = 0;
+      rows.forEach(row => {
+        const rec = bulkRowToRecord(row, fieldMap);
+        if (!rec.name) { skipped++; return; }
+        records.push(rec);
+      });
+
+      if (!records.length) {
+        msgEl.className = 'adminMsg err'; msgEl.textContent = '没有一行有姓名，无法导入。';
+        return;
+      }
+
+      _bulkRecords = records;
+      _bulkSkipped = skipped;
+      renderBulkPreview(fieldMap);
+    } catch (err) {
+      msgEl.className = 'adminMsg err'; msgEl.textContent = '解析文件失败：' + err.message;
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function renderBulkPreview(fieldMap){
+  const metaEl = document.getElementById('bulkPreviewMeta');
+  const tableEl = document.getElementById('bulkPreviewTable');
+  const errListEl = document.getElementById('bulkErrList');
+
+  const cols = ['name','idNumber','gender','statusRaw','isBlacklist'];
+  const colLabel = { name:'姓名', idNumber:'身份证号', gender:'性别', statusRaw:'备注/状态', isBlacklist:'黑名单' };
+  const recognized = cols.filter(c => fieldMap[c]).map(c => colLabel[c]).join('、');
+
+  let meta = `共识别到 <b>${_bulkRecords.length}</b> 条有效记录`;
+  if (_bulkSkipped > 0) meta += `，另有 <b>${_bulkSkipped}</b> 行因缺少姓名被跳过`;
+  meta += `。已识别列：${recognized || '（无）'}。`;
+  meta += ' 提交后，姓名或身份证号能匹配上已有名单的记录会被覆盖更新，其余作为新记录新增。';
+  metaEl.innerHTML = meta;
+
+  const previewRows = _bulkRecords.slice(0, 20);
+  let html = '<thead><tr>' + cols.map(c => `<th>${colLabel[c]}</th>`).join('') + '</tr></thead><tbody>';
+  previewRows.forEach(r => {
+    html += '<tr>' + cols.map(c => {
+      const v = c === 'isBlacklist' ? (r[c] ? '是' : '') : (r[c] || '');
+      return `<td>${String(v).replace(/</g,'&lt;')}</td>`;
+    }).join('') + '</tr>';
+  });
+  if (_bulkRecords.length > previewRows.length) {
+    html += `<tr><td colspan="${cols.length}" style="color:var(--muted)">... 还有 ${_bulkRecords.length - previewRows.length} 条，仅预览前 ${previewRows.length} 条 ...</td></tr>`;
+  }
+  html += '</tbody>';
+  tableEl.innerHTML = html;
+
+  errListEl.style.display = 'none';
+  errListEl.innerHTML = '';
+
+  document.getElementById('bulkPreview').classList.add('show');
+}
+
+function cancelBulkImport(clearFileInput){
+  _bulkRecords = [];
+  _bulkSkipped = 0;
+  document.getElementById('bulkPreview').classList.remove('show');
+  document.getElementById('bulkPreviewTable').innerHTML = '';
+  document.getElementById('bulkPreviewMeta').innerHTML = '';
+  const msgEl = document.getElementById('bulkMsg');
+  msgEl.className = 'adminMsg'; msgEl.textContent = '';
+  if (clearFileInput !== false) {
+    const fileEl = document.getElementById('bulkFile');
+    if (fileEl) fileEl.value = '';
+  }
+}
+
+async function submitBulkImport(){
+  const msgEl = document.getElementById('bulkMsg');
+  if (!_bulkRecords.length) {
+    msgEl.className = 'adminMsg err'; msgEl.textContent = '没有可提交的记录。';
+    return;
+  }
+  const btn = document.getElementById('bulkConfirmBtn');
+  btn.disabled = true;
+  msgEl.className = 'adminMsg'; msgEl.textContent = `正在导入 ${_bulkRecords.length} 条，请稍候...`;
+  try{
+    const res = await fetch(`${API_BASE}/api/admin/bulk-upsert`, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ password: _adminPwd, records: _bulkRecords })
+    });
+    const data = await res.json();
+    if (!data.ok) {
+      msgEl.className = 'adminMsg err'; msgEl.textContent = data.error || '导入失败';
+      btn.disabled = false;
+      return;
+    }
+    let msg = `✅ 导入完成：新增 ${data.added} 条，更新 ${data.updated} 条`;
+    if (data.skipped) msg += `，跳过 ${data.skipped} 条`;
+    msg += `，当前共 ${data.total} 条。`;
+    if (data.githubCommitted) {
+      msg += ' 已自动提交到 GitHub，Render 正在重新部署，1-2分钟后生效。';
+    } else {
+      msg += ' ⚠️ 未能提交到 GitHub（' + (data.githubError || '未知原因') + '），这次修改重启服务器后会丢失，请检查 GITHUB_TOKEN 配置。';
+    }
+    msgEl.className = 'adminMsg ok'; msgEl.textContent = msg;
+
+    if (data.errors && data.errors.length) {
+      const errListEl = document.getElementById('bulkErrList');
+      errListEl.style.display = 'block';
+      errListEl.innerHTML = data.errors.map(e => `<li>${String(e).replace(/</g,'&lt;')}</li>`).join('');
+    }
+
+    document.getElementById('bulkPreview').classList.remove('show');
+    _bulkRecords = [];
+    _bulkSkipped = 0;
+    document.getElementById('bulkFile').value = '';
+  }catch(e){
+    msgEl.className = 'adminMsg err'; msgEl.textContent = '导入失败：' + e.message;
+  }finally{
+    btn.disabled = false;
   }
 }
 </script>
