@@ -191,7 +191,7 @@
   </div>
 </div>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="xlsx.full.min.js"></script>
 <script>
 const API_BASE = '';
 
@@ -683,8 +683,27 @@ function handleBulkFile(file){
   };
   reader.onload = (e) => {
     try {
-      const data = new Uint8Array(e.target.result);
-      const wb = XLSX.read(data, { type: 'array' });
+      const bytes = new Uint8Array(e.target.result);
+      const isCsv = /\.csv$/i.test(file.name) || file.type === 'text/csv';
+      let wb;
+      if (isCsv) {
+        // CSV 没有内嵌编码信息，SheetJS 按字节数组读取时对纯 UTF-8（无 BOM）文本会误判成别的编码导致中文乱码。
+        // 这里自己解码成字符串再交给 SheetJS：优先按 UTF-8 严格解码（成功说明本来就是 UTF-8，含不含 BOM 都可以），
+        // 失败（说明不是合法 UTF-8）就按 GBK 解码 —— Windows 版 Excel 另存为普通"CSV"时最常见就是这个编码。
+        let text;
+        try {
+          text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+        } catch (encErr) {
+          try {
+            text = new TextDecoder('gbk').decode(bytes);
+          } catch (encErr2) {
+            text = new TextDecoder('utf-8').decode(bytes); // 兜底：不管乱不乱码，至少别崩
+          }
+        }
+        wb = XLSX.read(text, { type: 'string' });
+      } else {
+        wb = XLSX.read(bytes, { type: 'array' });
+      }
       const sheet = wb.Sheets[wb.SheetNames[0]];
       const rows = XLSX.utils.sheet_to_json(sheet, { defval: '', raw: false });
       if (!rows.length) {
