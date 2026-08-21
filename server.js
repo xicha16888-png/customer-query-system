@@ -357,6 +357,101 @@ async function commitToGithub() {
   }
 }
 
+// 批量导入用：把当前 CUSTOMER_LIST 建索引，避免每条记录都 O(n) 扫描一遍
+function buildIndices() {
+  const idIdx = new Map();
+  const idNoSuffixIdx = new Map();
+  const nameIdx = new Map();
+  CUSTOMER_LIST.forEach((r, i) => {
+    const idf = idKeyFull(r.idNumber);
+    const idn = idKeyNoSuffix(r.idNumber);
+    const nm = normName(r.name);
+    if (idf && idf.length >= 6) idIdx.set(idf, i);
+    if (idn && idn.length >= 6) idNoSuffixIdx.set(idn, i);
+    if (nm) nameIdx.set(nm, i);
+  });
+  return { idIdx, idNoSuffixIdx, nameIdx };
+}
+
+function findExistingIndexFast(name, idNumber, indices) {
+  const qId = idKeyFull(idNumber);
+  const qIdNoSuffix = idKeyNoSuffix(idNumber);
+  const qName = normName(name);
+  if (qId && qId.length >= 6) {
+    if (indices.idIdx.has(qId)) return indices.idIdx.get(qId);
+    if (indices.idNoSuffixIdx.has(qIdNoSuffix)) return indices.idNoSuffixIdx.get(qIdNoSuffix);
+  }
+  if (qName && indices.nameIdx.has(qName)) return indices.nameIdx.get(qName);
+  return -1;
+}
+
+// 批量导入（Excel/CSV 在前端解析成 JSON 数组后传过来）：一次性新增/更新多条，只写一次本地文件、提交一次 GitHub
+app.post('/api/admin/bulk-upsert', async (req, res) => {
+  if (!checkPassword(req, res)) return;
+  const records = Array.isArray(req.body.records) ? req.body.records : null;
+  if (!records || records.length === 0) {
+    return res.status(400).json({ ok: false, error: '没有可导入的记录' });
+  }
+  if (records.length > 20000) {
+    return res.status(400).json({ ok: false, error: '单次最多导入 20000 条，请分批导入' });
+  }
+
+  const indices = buildIndices();
+  let added = 0, updated = 0, skipped = 0;
+  const errors = [];
+
+  records.forEach((raw, i) => {
+    const name = (raw && raw.name || '').toString().trim();
+    const idNumber = (raw && raw.idNumber || '').toString().trim();
+    const gender = (raw && raw.gender || '').toString().trim();
+    const statusRaw = (raw && raw.statusRaw || '').toString().trim();
+    const isBlacklist = !!(raw && raw.isBlacklist);
+
+    if (!name) {
+      skipped++;
+      if (errors.length < 50) errors.push('第 ' + (i + 1) + ' 行：缺少姓名，已跳过');
+      return;
+    }
+
+    const idx = findExistingIndexFast(name, idNumber, indices);
+    const record = { name, idNumber, gender, statusRaw, isBlacklist };
+
+    if (idx >= 0) {
+      CUSTOMER_LIST[idx] = record;
+      updated++;
+    } else {
+      CUSTOMER_LIST.push(record);
+      const newIdx = CUSTOMER_LIST.length - 1;
+      const idf = idKeyFull(idNumber);
+      const idn = idKeyNoSuffix(idNumber);
+      const nm = normName(name);
+      if (idf && idf.length >= 6) indices.idIdx.set(idf, newIdx);
+      if (idn && idn.length >= 6) indices.idNoSuffixIdx.set(idn, newIdx);
+      if (nm) indices.nameIdx.set(nm, newIdx);
+      added++;
+    }
+  });
+
+  try {
+    fs.writeFileSync(CUSTOMER_LIST_PATH, JSON.stringify(CUSTOMER_LIST), 'utf-8');
+  } catch (e) {
+    console.error('本地写入 customer-list.json 失败:', e.message);
+  }
+
+  const gitResult = await commitToGithub();
+
+  res.json({
+    ok: true,
+    added,
+    updated,
+    skipped,
+    total: CUSTOMER_LIST.length,
+    errors,
+    githubCommitted: gitResult.ok,
+    githubError: gitResult.ok ? null : gitResult.error
+  });
+});
+
 // 查找已有记录，方便添加前先核对是否已存在
 app.post('/api/admin/lookup', (req, res) => {
   if (!checkPassword(req, res)) return;
